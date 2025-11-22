@@ -1,0 +1,15 @@
+
+android jni
+===========
+- [ ] 回调到 kotlin/java
+- [ ] 删除过期日志 （用rust，初始化时启动一个后台task扫描删除）
+- [x] 日志 tracing span
+- [x] 输出日志到 文件 和 logcat
+- [x] 输出日志到 logcat
+- [x] JNI_OnLoad 初始化
+
+cargo run --bin uniffi-bindgen \
+  -- generate --library target/aarch64-linux-android/debug/libvvclient.so \
+  --language kotlin \
+  --out-dir ./out_kotlin \
+  --no-format
