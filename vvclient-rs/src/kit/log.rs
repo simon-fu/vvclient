@@ -162,7 +162,7 @@ macro_rules! init_log {
     };
 
     ($extra_mods:expr, $file_args:expr, $to_std_out:expr) => {
-        $crate::log::init_log_with(
+        $crate::kit::log::init_log_with(
             $crate::env_filter!($extra_mods)?,
             $file_args,
             $to_std_out,
@@ -361,7 +361,7 @@ macro_rules! env_filter {
     };
 
     ($extra_mods:expr) => {
-        $crate::log::make_env_filter(env!("CARGO_CRATE_NAME"), env!("CARGO_PKG_NAME"), $extra_mods)
+        $crate::kit::log::make_env_filter(env!("CARGO_CRATE_NAME"), env!("CARGO_PKG_NAME"), $extra_mods)
     };
 }
 

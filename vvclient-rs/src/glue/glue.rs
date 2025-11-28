@@ -6,7 +6,7 @@ use std::time::Duration;
 use anyhow::Context;
 use tracing::{Instrument, Level};
 
-use crate::async_rt;
+use crate::kit::async_rt;
 
 // use crate::error::ClientError;
 // type Result<T, E = ClientError> = std::result::Result<T, E>;

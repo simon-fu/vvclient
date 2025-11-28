@@ -29,7 +29,7 @@ pub extern "C" fn JNI_OnLoad(_vm: *mut jni::sys::JavaVM, _: *mut std::os::raw::c
     //     return 0;
     // }
 
-    // let r = crate::async_rt::try_init();
+    // let r = crate::kit::async_rt::try_init();
     // if let Err(e) = r {
     //     log::error!("async_rt::try_init error {e:?}");
     //     return 0;
@@ -67,7 +67,7 @@ pub fn init_lib(
     }
     log::info!("init_lib: log_dir {:?}, to_logcat {:?}", log_dir, to_logcat);
     
-    let r = crate::async_rt::try_init();
+    let r = crate::kit::async_rt::try_init();
     if let Err(e) = r {
         let reason = format!("async_rt::try_init error {e:?}");
         log::error!("{}", reason);
@@ -81,7 +81,7 @@ pub fn init_lib(
 
 
 mod android_log {
-    use crate::log::{LogFileArgs, make_file_layer};
+    use crate::kit::log::{LogFileArgs, make_file_layer};
     use anyhow::{Result, Context};
     use tracing_subscriber::layer::SubscriberExt;
 

@@ -1,5 +1,5 @@
 
-use std::{future::Future, sync::OnceLock, time::Duration};
+use std::{future::Future, sync::OnceLock, time::{Duration, Instant}};
 
 use anyhow::{Context as _, Result, bail};
 use tokio::{runtime::Runtime, task::JoinHandle};
@@ -147,6 +147,7 @@ fn do_init() -> Result<&'static AsyncRT> {
 //     let _r = task.await;
 // }
 
+#[inline]
 pub fn spawn<F>(fut: F) -> JoinHandle<F::Output>
 where
     F: Future + Send + 'static,
@@ -155,7 +156,23 @@ where
     get_inst().runtime.spawn(fut)
 }
 
+#[inline]
+pub fn spawn_with_span<T>(span: tracing::Span, fut: T) -> tokio::task::JoinHandle<T::Output>
+where
+    T: std::future::Future + Send + 'static,
+    T::Output: Send + 'static,
+{
+    tokio::spawn(tracing::Instrument::instrument(fut, span))
+}
+
+#[inline]
 pub async fn sleep(duration: Duration) {
     tokio::time::sleep(duration).await;
 }
+
+#[inline]
+pub async fn sleep_until(deadline: Instant) {
+    tokio::time::sleep_until(deadline.into()).await;
+}
+
 

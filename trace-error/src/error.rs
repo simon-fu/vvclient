@@ -1,19 +1,19 @@
 
 
-use anyhow::Error;
+// use anyhow::Error;
 
-pub struct TraceError(Error);
+// pub struct TraceError(Error);
 
-impl From<Error> for TraceError {
-    fn from(value: Error) -> Self {
-        Self(value)
-    }
-}
+// impl From<Error> for TraceError {
+//     fn from(value: Error) -> Self {
+//         Self(value)
+//     }
+// }
 
-impl From<TraceError> for Error {
-    fn from(value: TraceError) -> Self {
-        value.0
-    }
-}
+// impl From<TraceError> for Error {
+//     fn from(value: TraceError) -> Self {
+//         value.0
+//     }
+// }
 
 
