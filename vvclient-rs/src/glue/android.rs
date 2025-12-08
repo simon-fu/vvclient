@@ -67,14 +67,14 @@ pub fn init_lib(
     }
     log::info!("init_lib: log_dir {:?}, to_logcat {:?}", log_dir, to_logcat);
     
-    let r = crate::kit::async_rt::try_init();
-    if let Err(e) = r {
+    let r = crate::kit::async_rt::maybe_init();
+    if let Err(e) = &r {
         let reason = format!("async_rt::try_init error {e:?}");
         log::error!("{}", reason);
         return reason;
     }
 
-    log::info!("init_lib ok");
+    log::info!("init_lib ok, init async_rt {:?}", r);
 
     String::new()
 }

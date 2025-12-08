@@ -6,9 +6,9 @@ mod tests;
 mod error;
 
 
-pub trait WithLine<O> {
-    fn with_line(self) -> O;
-}
+// pub trait WithLine<O> {
+//     fn with_line(self) -> O;
+// }
 
 
 // pub use error::*;

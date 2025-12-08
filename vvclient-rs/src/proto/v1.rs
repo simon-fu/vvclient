@@ -1,7 +1,7 @@
 
 use std::{borrow::Cow, collections::HashMap, fmt};
 
-use anyhow::{bail, Context as _, Result};
+use anyhow::{Context as _, Result, bail};
 use strum_macros::FromRepr;
 
 use crate::kit::astr::AStr;
@@ -91,6 +91,26 @@ impl<'a> PacketRef<'a> {
         let body = self.body.as_ref().with_context(||format!("expect request body"))?;
         let req : ClientRequest = serde_json::from_str(&body).with_context(||"invalid client req body")?;
         Ok(req)
+    }
+
+    pub fn parse_as_server_rsp(&self) -> Result<ServerResponse> {
+
+        // let typ = self.typ();
+
+        // match typ {
+        //     Some(PacketType::Response) => {}
+        //     _ => return Err(anyhow!("expect response but typ [{:?}]", self.typ))
+        // }
+
+        let body = self.body.as_ref().with_context(||format!("expect server response body"))?;
+        let typed : ServerResponse = serde_json::from_str(&body).with_context(||"invalid server response body")?;
+        Ok(typed)
+    }
+
+    pub fn parse_as_server_push(&self) -> Result<ServerPush> {
+        let body = self.body.as_ref().with_context(||format!("expect server push body"))?;
+        let typed : ServerPush = serde_json::from_str(&body).with_context(||"invalid server push body")?;
+        Ok(typed)
     }
 
     pub fn to_meta(&self) -> PacketMeta {
@@ -292,6 +312,35 @@ pub struct IdRef<'a> {
     pub id: &'a str,
 }
 
+#[derive(serde::Deserialize, Clone, PartialEq, Debug)]
+pub struct Id {
+    pub id: String,
+}
+
+#[derive(serde::Deserialize, Clone, PartialEq, Debug)]
+pub struct ServerPush {
+    pub typ: ServerPushType,
+}
+
+#[derive(serde::Deserialize, Clone, PartialEq, Debug)]
+pub enum ServerPushType {
+    Closed(ClosedNotice),
+    Chat(ChatNotice),
+    /// User Init
+    UInit(Id),
+    /// User Ready
+    UReady(Id),
+    /// User Full
+    UFull(UserState), 
+    /// User Tree
+    UTree(TreeState),
+    /// Room Tree 
+    RTree(TreeState),
+    /// Room Ready 
+    RReady(Id),
+}
+
+
 #[derive(serde::Serialize, serde::Deserialize, Clone, PartialEq, Debug)]
 pub struct ClientMessage {
 
@@ -390,7 +439,9 @@ pub struct MuteRequest {
     
     pub room_id: String,
 
-    pub producer_id: String,
+    pub producer_id: Option<String>,
+
+    pub stream_id: Option<String>,
 
     pub muted: bool,
 }
@@ -676,6 +727,16 @@ pub struct ChatNoticeRef<'a> {
     pub body: &'a str,
 }
 
+#[derive(serde::Deserialize, Clone, PartialEq, Debug)]
+pub struct ChatNotice {
+
+    pub from: String,
+
+    pub to: String,
+
+    pub body: String,
+}
+
 #[derive(serde::Serialize, Clone, PartialEq, Debug)]
 pub struct TreeStateRef<'a> {
     pub path: &'a str,
@@ -689,6 +750,21 @@ pub struct TreeStateRef<'a> {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub prune: Option<bool>,
 }
+
+#[derive(serde::Deserialize, Clone, PartialEq, Debug)]
+pub struct TreeState {
+    pub path: String,
+    
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub value: Option<String>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub id: Option<String>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub prune: Option<bool>,
+}
+
 // pub mod room_notice {
     // #[derive(serde::Deserialize, serde::Serialize)]
     // // #[derive(::dump_derive::Dump)]
@@ -911,7 +987,11 @@ pub struct UnPublishRequest {
     pub room_id: ::prost::alloc::string::String,
 
     /// 生产者 Id
-    pub producer_id: ::prost::alloc::string::String,
+    pub producer_id: Option<String>,
+
+    /// 媒体流 Id （和生产者 Id 二选一）
+    pub stream_id: Option<String>,
+
 }
 
 /// 订阅媒体流请求参数
@@ -1074,11 +1154,20 @@ pub struct ChatResponse {
     
 }
 
+#[derive( Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, FromRepr)]
+#[repr(i32)]
 pub enum StreamType {
     Camera = 1,
     Mic = 2,
     Screen = 3, 
 }
+
+impl StreamType {
+    pub fn value(&self) -> i32 {
+        *self as i32
+    }
+}
+
 
 
 // impl TryFrom<i32> for StreamType {

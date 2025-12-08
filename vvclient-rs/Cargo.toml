@@ -61,6 +61,8 @@ regex = "1.12.2"
 # function_name = "0.3.0"
 
 trace-error = {path = "../trace-error"}
+paste = "1.0.15"
+const_format = "0.2.35"
 
 [target.'cfg(target_os = "android")'.dependencies]
 # android_logger = "0.15"

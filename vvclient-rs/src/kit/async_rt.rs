@@ -24,7 +24,7 @@ fn get_inst() -> &'static AsyncRT {
     inst
 }
 
-pub fn try_init() -> Result<bool> {
+pub fn maybe_init() -> Result<bool> {
     if INST.get().is_some() {
         Ok(false)
     } else{
@@ -162,7 +162,8 @@ where
     T: std::future::Future + Send + 'static,
     T::Output: Send + 'static,
 {
-    tokio::spawn(tracing::Instrument::instrument(fut, span))
+    spawn(tracing::Instrument::instrument(fut, span))
+    // tokio::spawn(tracing::Instrument::instrument(fut, span))
 }
 
 #[inline]

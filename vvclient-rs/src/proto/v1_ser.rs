@@ -1,8 +1,9 @@
 
 
-use crate::proto::fmt_writer::JsonDisplay;
+use crate::proto::{fmt_writer::JsonDisplay, mediasoup};
 
 use super::UpdateTreeRequest;
+// use super::mediasoup;
 
 #[derive(serde::Serialize, Clone, PartialEq, Debug)]
 pub struct PacketSer<B> {
@@ -62,6 +63,8 @@ pub enum OpenTypeSer<T> {
     // Ack(super::PushAck),
 }
 
+
+
 #[derive(serde::Serialize, Clone, PartialEq, Debug)]
 pub struct OpenSessionRequestSer<'a, UTREE> 
 // where 
@@ -92,17 +95,6 @@ impl<'a, UTREE> OpenSessionRequestSer<'a, UTREE> {
     }
 }
 
-// impl<'a, UTREE> OpenSessionRequestSer<'a, UTREE> 
-// where 
-//     // UTREE: Iterator<Item = UpdateTreeRequestRef<'a>> + 'a,
-//     UTREE: serde::Serialize + 'a,
-// {
-//     pub fn into_msg(self) -> impl serde::Serialize + 'a {
-//         ClientRequestRef {
-//             typ: OpenTypeRef::Open(self)
-//         }
-//     }
-// }
 
 #[derive(serde::Serialize, Clone, PartialEq, Debug)]
 pub struct UpdateTreeRequestSer<'a> {
@@ -126,6 +118,199 @@ impl<'a> From<&'a UpdateTreeRequest> for UpdateTreeRequestSer<'a> {
     }
 }
 
+/// 创建 WebRtcTransport 请求参数
+#[derive(serde::Serialize, Clone, PartialEq, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct CreateWebrtcTransportRequestSer<'a, DTLS> {
+
+    /// Room Id
+    pub room_id: &'a str,
+
+    /// 传输通道方向, 见 Direction  
+    pub dir: i32,
+
+    /// 媒体类型, 见 MediaKind
+    pub kind: i32,
+
+    /// 客户端的 Dtls Parameters
+    pub dtls: ::core::option::Option<DTLS>, // mediasoup::prelude::DtlsParameters
+}
+
+impl<'a, DTLS> CreateWebrtcTransportRequestSer<'a, DTLS> {
+    pub fn into_msg(self) -> ClientRequestSer<CreateXTypeSer<Self>> {
+        ClientRequestSer {
+            typ: CreateXTypeSer::CreateX(self)
+        }
+    }
+
+    // pub fn into_body(self) -> JsonDisplay<ClientRequestSer<CreateXTypeSer<Self>>> {
+    //     JsonDisplay(self.into_msg())
+    // }
+}
+
+#[derive(serde::Serialize, Clone, PartialEq, Debug)]
+pub enum CreateXTypeSer<T> {
+    CreateX(T),
+}
+
+
+#[derive(serde::Serialize, Clone, PartialEq, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct ConnectWebrtcTransportRequestSer<'a, DTLS> {
+    /// Transport Id
+    pub xid: &'a str,
+
+    /// Client Dtls Parameters
+    pub dtls: ::core::option::Option<DTLS>,
+}
+
+impl<'a, DTLS> ConnectWebrtcTransportRequestSer<'a, DTLS> {
+    pub fn into_msg(self) -> ClientRequestSer<ConnXTypeSer<Self>> {
+        ClientRequestSer {
+            typ: ConnXTypeSer::ConnX(self)
+        }
+    }
+}
+
+#[derive(serde::Serialize, Clone, PartialEq, Debug)]
+pub enum ConnXTypeSer<T> {
+    ConnX(T),
+}
+
+#[derive(Debug, Clone, Ord, PartialOrd, Eq, PartialEq, Hash, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct IceCandidateSer<'a> {
+    /// Unique identifier that allows ICE to correlate candidates that appear on multiple
+    /// transports.
+    pub foundation: &'a str,
+    /// The assigned priority of the candidate.
+    pub priority: u32,
+    /// The IP address or hostname of the candidate.
+    pub ip: &'a str, // address
+    /// The protocol of the candidate.
+    pub protocol: mediasoup::prelude::Protocol,
+    /// The port for the candidate.
+    pub port: u16,
+    /// The type of candidate (always `Host`).
+    pub r#type: mediasoup::prelude::IceCandidateType,
+    /// The type of TCP candidate (always `Passive`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tcp_type: Option<mediasoup::prelude::IceCandidateTcpType>,
+}
+
+impl<'a> From<&'a mediasoup::prelude::IceCandidate> for IceCandidateSer<'a> {
+    fn from(value: &'a mediasoup::prelude::IceCandidate) -> Self {
+        Self {
+            foundation: &value.foundation,
+            priority: value.priority,
+            ip: &value.address,
+            protocol: value.protocol,
+            port: value.port,
+            r#type: value.r#type,
+            tcp_type: value.tcp_type,
+        }
+    }
+}
+
+
+#[derive(serde::Serialize, serde::Deserialize, Clone, PartialEq, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct PublishRequestSer<'a, RTP> {
+    /// Room Id
+    pub room_id: &'a str,
+    
+    /// 发送通道 Transport Id
+    pub xid: &'a str,
+    
+    pub stream_id: &'a str,
+    
+    /// 媒体类型, 见 MediaKind
+    // pub kind: i32,
+
+    /// 媒体流类型
+    pub stype: i32,
+
+    /// Rtp Parameters
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub rtp: Option<RTP>, // ::core::option::Option<mediasoup::prelude::RtpParameters>,
+
+    /// 音频类型, 见 AudioType
+    pub audio_type: i32,
+
+    pub muted: ::core::option::Option<bool>,
+
+}
+
+impl<'a, RTP> PublishRequestSer<'a, RTP> {
+    pub fn into_msg(self) -> ClientRequestSer<PublishTypeSer<Self>> {
+        ClientRequestSer {
+            typ: PublishTypeSer::Pub(self)
+        }
+    }
+}
+
+#[derive(serde::Serialize, Clone, PartialEq, Debug)]
+pub enum PublishTypeSer<T> {
+    Pub(T),
+}
+
+#[derive(serde::Serialize, Clone, PartialEq, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct UnPublishRequestSer<'a> {
+    /// Room Id
+    pub room_id: &'a str,
+
+    /// 生产者 Id
+    pub producer_id: Option<&'a str>,
+
+    /// 媒体流 Id （和生产者 Id 二选一）
+    pub stream_id: Option<&'a str>,
+
+}
+
+impl<'a> UnPublishRequestSer<'a> {
+    pub fn into_msg(self) -> ClientRequestSer<UnPublishTypeSer<Self>> {
+        ClientRequestSer {
+            typ: UnPublishTypeSer::UPub(self)
+        }
+    }
+}
+
+#[derive(serde::Serialize, Clone, PartialEq, Debug)]
+pub enum UnPublishTypeSer<T> {
+    UPub(T),
+}
+
+
+
+#[derive(serde::Serialize, Clone, PartialEq, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct MuteRequestSer<'a> {
+    
+    pub room_id: &'a str,
+
+    pub producer_id: Option<&'a str>,
+
+    pub stream_id: Option<&'a str>,
+
+    pub muted: bool,
+}
+
+
+impl<'a> MuteRequestSer<'a> {
+    pub fn into_msg(self) -> ClientRequestSer<MuteTypeSer<Self>> {
+        ClientRequestSer {
+            typ: MuteTypeSer::Mute(self)
+        }
+    }
+}
+
+#[derive(serde::Serialize, Clone, PartialEq, Debug)]
+pub enum MuteTypeSer<T> {
+    Mute(T),
+}
+
+
 
 pub trait IntoIterSerialize {
     fn into_iter_ser(self) -> impl serde::Serialize;
@@ -143,7 +328,7 @@ where
 
 
 #[derive(Clone, PartialEq, Debug)]
-pub struct IterSer<I>(I);
+pub struct IterSer<I>(pub I);
 
 impl<I, O> serde::Serialize for IterSer<I> 
 where 

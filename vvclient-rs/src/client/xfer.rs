@@ -62,7 +62,7 @@ impl Xfer {
         self.sent_ack_sn = 0;
     }
 
-    pub fn add_qos1_typed<B>(&mut self, typ: PacketType, body: &B, msg_id: Option<i64>) -> Result<()>
+    pub fn add_qos1_typed<B>(&mut self, typ: PacketType, body: &B, msg_id: Option<i64>) -> Result<i64>
     where 
         B: serde::Serialize,
     {
@@ -71,7 +71,7 @@ impl Xfer {
         self.add_qos1_json(typ, &body_json, msg_id)
     }
 
-    pub fn add_qos1_json(&mut self, typ: PacketType, body_json: &str, msg_id: Option<i64>) -> Result<()> {
+    pub fn add_qos1_json(&mut self, typ: PacketType, body_json: &str, msg_id: Option<i64>) -> Result<i64> {
         let sn = self.tail_sn + 1;
 
         let mut packet = PacketRef::qos1(sn, typ, body_json);
@@ -83,7 +83,7 @@ impl Xfer {
         
         self.que.push_back((sn, packet_json));
         self.tail_sn = sn;
-        Ok(())
+        Ok(sn)
     }
 
     fn fill_ack(&mut self, msg_id: Option<i64>, packet: &mut PacketRef) {
@@ -103,37 +103,32 @@ impl Xfer {
         }
     }
 
-    pub fn add_push_json(&mut self, body_json: &str) -> Result<()> {
+    pub fn add_push_json(&mut self, body_json: &str) -> Result<i64> {
         self.add_qos1_json(PacketType::Push1, body_json, None)
     }
 
-    pub fn add_push_typed<B>(&mut self, body: &B) -> Result<()>
+    pub fn add_push_typed<B>(&mut self, body: &B) -> Result<i64>
     where 
         B: serde::Serialize,
     {
         self.add_qos1_typed(PacketType::Push1, body, None)
     }
 
-    pub fn add_user_ready(&mut self, user_id: &str) -> Result<()> {
+    pub fn add_user_ready(&mut self, user_id: &str) -> Result<i64> {
         self.add_push_typed(&ServerPushRef::user_ready(IdRef {
             id: user_id
         }))
     }
 
-    // pub fn add_room_ready(&mut self, room: &ARoom) -> Result<()> {
-    //     self.add_push_typed(&ServerPushRef::room_ready(IdRef {
-    //         id: room.id(),
-    //     }))
-    // }
 
-    pub fn add_response_typed<B>(&mut self, body: &B, msg_id: Option<i64>) -> Result<()>
+    pub fn add_response_typed<B>(&mut self, body: &B, msg_id: Option<i64>) -> Result<i64>
     where 
         B: serde::Serialize,
     {
         self.add_qos1_typed(PacketType::Response, body, msg_id)
     }
 
-    pub fn add_response_fail(&mut self, msg_id: Option<i64>, status: &Status) -> Result<()> {
+    pub fn add_response_fail(&mut self, msg_id: Option<i64>, status: &Status) -> Result<i64> {
         let response = ServerResponseRef {
             status: Some(status),
             // msg_id,
@@ -142,6 +137,22 @@ impl Xfer {
 
         self.add_response_typed(&response, msg_id)
     }
+
+    pub fn send_iter<'a>(&'a mut self) -> SendIter<'a> {
+        SendIter {
+            owner: self,
+            pending: false,
+        }
+    }
+
+    pub fn ack_iter<'a>(&'a mut self) -> AckIter<'a> {
+        AckIter {
+            owner: self,
+            pending: false,
+        }
+    }
+
+
 
     pub async fn flush<F, Fut>(&mut self, mut func: F) -> Result<()> 
     where 
@@ -277,3 +288,59 @@ impl Xfer {
     // }
 
 }
+
+
+pub struct SendIter<'a> {
+    owner: &'a mut Xfer,
+    pending: bool,
+}
+
+impl<'a> Iterator for SendIter<'a> {
+    type Item = Packet;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.pending {
+            self.owner.send_index += 1;
+        }
+
+        match self.owner.que.get(self.owner.send_index) {
+            Some(v) => {
+                self.pending = true;
+                Some(v.1.clone())
+            },
+            None => {
+                self.pending = false;
+                None
+            },
+        }
+    }
+}
+
+pub struct AckIter<'a> {
+    owner: &'a mut Xfer,
+    pending: bool,
+}
+
+impl<'a> Iterator for AckIter<'a> {
+    type Item = Result<Packet>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.pending {
+            self.owner.sent_ack_sn = self.owner.recv_sn;
+            self.pending = false;
+            return None
+        }
+
+        if self.owner.sent_ack_sn < self.owner.recv_sn {
+            let item = PacketRef::ack_json(self.owner.recv_sn);
+            self.pending = true;
+            return Some(item)
+        }
+
+        self.pending = false;
+        None
+    }
+}
+
+
+
