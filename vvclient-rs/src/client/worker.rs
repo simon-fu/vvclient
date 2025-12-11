@@ -1,0 +1,798 @@
+
+use anyhow::{anyhow, Context, Result};
+use log::{debug, error, info, warn};
+
+use core::future::Future;
+
+use tokio::{sync::mpsc, task::JoinHandle, time::timeout};
+// use mp_common_rs::prost::Message as PbMsg;
+use tokio_tungstenite::tungstenite::http::Uri;
+
+use tracing::{Span, instrument};
+
+use trace_error::anyhow::trace_result;
+
+use std::time::{Duration, Instant};
+
+use crate::{client::{ws_tung::{TungConnector, TungStream}, xfer::Xfer}, kit::{astr::AStr, async_rt}, proto::{self}};
+
+use super::defines::*;
+
+
+
+pub struct Worker {
+    task_handle: JoinHandle<()>,
+    tx: mpsc::Sender<()>,
+}
+
+impl Worker {
+
+    #[trace_result]
+    pub fn try_new<S, T>(url: S, span: Option<Span>, config: JoinConfig, listener: T) -> Result<Self> 
+    where 
+        S: Into<String>,
+        T: Delegate,
+    {
+        
+        let url = url.into();
+
+        let uri: Uri = url.parse()
+            .with_context(|| format!("invalid url [{url}]"))?;
+
+        let scheme = uri.scheme_str()
+            .with_context(||"url has no scheme")?;
+
+        if false
+            || scheme.eq_ignore_ascii_case("ws") 
+            || scheme.eq_ignore_ascii_case("wss") {
+            // SchemeClient::Ws
+        } else {
+            return Err(anyhow!("unsupported scheme [{scheme}]"))
+        };
+
+        let url: AStr = url.into();
+
+        let (tx, rx) = mpsc::channel(1);
+
+        let task = Task {
+            connector: TungConnector::new(config.advance.connection.ignore_server_cert),
+            config,
+            url,
+            rx,
+            listener,
+        };
+
+        let span = match span {
+            Some(v) => v,
+            None => tracing::span!(parent: None, tracing::Level::ERROR, "client"),
+        };
+
+        let task_handle = async_rt::spawn_with_span(span,  async move {
+            task.run().await;
+        });
+
+        Ok(Self {
+            task_handle,
+            tx,
+            // shared,
+            // _mark: Default::default(),
+        })
+    }
+
+    pub async fn into_finish(self) {
+        drop(self.tx);
+        let _r = self.task_handle.await;
+    }
+
+    #[trace_result]
+    pub fn commit(&self) -> Result<()> {
+        let r = self.tx.try_send(());
+
+        if let Err(e) = r {
+            match e {
+                mpsc::error::TrySendError::Full(_v) => {},
+                mpsc::error::TrySendError::Closed(_v) => {
+                    return Err(anyhow!("client already closed"))
+                },
+            }
+        }
+        Ok(())
+    }
+
+}
+
+
+struct Task<T: Delegate> {
+    url: AStr,
+    config: JoinConfig,
+    connector: TungConnector,
+    rx: mpsc::Receiver<()>,
+    listener: T,
+}
+
+impl<T: Delegate> Task<T> {
+
+    #[trace_result]
+    async fn run(mut self) {
+
+        let r = self.try_run().await;
+
+        let status = match r {
+            Ok(_v) => {
+                debug!("finished Ok");
+                proto::Status::default()
+            },
+            Err(e) => {
+                let err = trace_error!("finished error", e);
+                error!("{}", fmt_error!(err));
+
+                let status: proto::Status = err.into();
+                status
+            },
+        };
+
+        let r = self.listener.on_closed(status).await;
+
+        if let Err(e) = r {
+            error!("{}", trace_fmt!("on_closed failed", e));
+        }
+    }
+
+    #[trace_result]
+    async fn try_run(&mut self) -> Result<()> {
+
+        let mut session = self.phase_open().await?;
+
+        // while !self.rx.is_closed() {
+        loop {
+            let r = self.phase_work(&mut session).await;
+
+            if self.rx.is_closed() {
+                //  把错误往上抛
+                r?;
+            } else {
+                if let Err(e) = r {
+                    error!("{}", trace_fmt!("phase_work failed", e));
+                }
+            }
+
+            self.phase_reconnect(&mut session).await?;
+        }
+
+        // Ok(())
+    }
+
+    #[trace_result]
+    #[instrument(name="work", skip(self, session))]
+    async fn phase_work(&mut self, session: &mut Session) -> Result<()> {
+        let mut rraw = RecvRaw::default();
+
+        loop {
+            self.try_handle_op(session).await.with_context(||"try_handle_msgs failed")?;
+            
+            let r = self.recv_packet(&mut session.conn, &mut rraw).await.with_context(||"recv_packet falied")?;
+
+            let Some(packet) = r else {
+                continue;
+            };
+
+            if let Some(ack_sn) = packet.ack {
+                session.xfer.update_recv_ack(ack_sn);
+            }
+
+            if let Some(sn) = packet.sn() {
+                session.xfer.update_recv_sn(sn);
+            }
+
+            let Some(pkt_type) = packet.typ() else {
+                return Ok(())
+            };
+            
+            match pkt_type {
+                proto::PacketType::Response => {
+                    let typed = packet.parse_as_server_rsp()?;
+                    let ack = packet.ack.with_context(||"no sn field in response")?;
+                    self.listener.on_response(session, ack, typed).await?;
+                    // self.handle_response(session, ack, typed).await?;
+                },
+
+                proto::PacketType::Push0
+                | proto::PacketType::Push1
+                | proto::PacketType::Push2
+                => {
+                    let typed = packet.parse_as_server_push()?;
+                    self.listener.on_push(session, typed).await?;
+                }
+
+                _ => {
+                    return Err(anyhow!("unknown packet {:?}", packet));
+                }
+            };
+
+        }
+
+        // Ok(())
+    }
+
+    // #[trace_result]
+    // #[instrument(skip(self, session, push))]
+    // async fn handle_server_push(&mut self, session: &mut Session, push: proto::ServerPush) -> Result<()> {
+    //     match push.typ {
+    //         proto::ServerPushType::Closed(notice) => {
+    //             return Err(notice.status.unwrap_or_default())
+    //         },
+    //         proto::ServerPushType::Chat(notice) => {
+    //             const CHAT_DIV: char = '.';
+    //             const USER_PREFIX: &'static str = formatcp!("u{CHAT_DIV}"); 
+    //             const ROOM_PREFIX: &'static str = formatcp!("r{CHAT_DIV}"); 
+
+    //             let Some(from_user_id) = notice.from.strip_prefix(USER_PREFIX) else {
+    //                 warn!("unknown chat.from [{}]", notice.from);
+    //                 return Ok(());
+    //             };
+
+    //             if let Some(room_id) = notice.to.strip_prefix(ROOM_PREFIX) {
+    //                 self.listener.on_room_chat(from_user_id, room_id, &notice.body)?;
+
+    //             } else if let Some(to_user_id) = notice.to.strip_prefix(USER_PREFIX) {
+    //                 self.listener.on_user_chat(from_user_id, to_user_id, &notice.body)?;
+
+    //             } else {
+    //                 warn!("unknown chat.to [{}]", notice.to);
+    //                 return Ok(());
+    //             }
+    //         },
+    //         proto::ServerPushType::UInit(id) => {
+    //             let user_id: AStr = id.id.into();
+    //             if let Some(cell) = self.users.remove(&user_id) {
+    //                 debug!("got user init but has user [{cell:?}]");
+    //                 self.listener.on_user_leaved(user_id)?;
+    //             }
+    //         },
+    //         proto::ServerPushType::UReady(id) => {
+    //             let user_id: AStr = id.id.into();
+
+    //             let Some(user) = self.users.get_mut(&user_id) else {
+    //                 warn!("got user ready but NOT found user [{user_id}]");
+    //                 return Ok(())
+    //             };
+
+    //             match &user.stage {
+    //                 UserStage::Init => {},
+    //                 UserStage::Ready => {
+    //                     warn!("already ready but got user ready again, user_id [{user_id}]");
+    //                 },
+    //             }
+
+    //             user.stage = UserStage::Ready;
+    //             let tree = core::mem::replace(&mut user.tree, Vec::new());
+    //             let brief = user.brief();
+    //             self.listener.on_user_joined(user_id.clone(), tree)?;
+
+    //             if let Some(muted) = brief.camera_muted {
+    //                 self.listener.on_add_stream(user_id.clone(), proto::StreamType::Camera.value(), muted)?;
+    //             }
+                
+    //             if let Some(muted) = brief.mic_muted {
+    //                 self.listener.on_add_stream(user_id.clone(), proto::StreamType::Mic.value(), muted)?;
+    //             }
+
+    //             if let Some(muted) = brief.screen_muted {
+    //                 self.listener.on_add_stream(user_id.clone(), proto::StreamType::Screen.value(), muted)?;
+    //             }
+
+    //             self.handle_extra_user(session, &user_id).await?;
+    //         },
+    //         proto::ServerPushType::UFull(new_state) => {
+    //             let r = self.users.remove_entry(new_state.id.as_str());
+
+    //             let (user_id, cell) = match r {
+    //                 Some((user_id, mut cell)) => {
+    //                     match &cell.stage {
+    //                         UserStage::Init => {
+    //                             if !new_state.online {
+    //                                 return Ok(())
+    //                             }
+    //                         },
+    //                         UserStage::Ready => {
+    //                             if !new_state.online {
+    //                                 // debug!("leaved user [{user_id}]");
+    //                                 self.listener.on_user_leaved(user_id.clone())?;
+    //                                 return Ok(())
+    //                             }
+
+    //                             if new_state.inst_id != cell.state.inst_id {
+    //                                 // 不应该走到这里
+    //                                 warn!("got new user instance, old [{}], new [{}]", cell.state.inst_id, new_state.inst_id);
+    //                                 self.listener.on_user_leaved(user_id.clone())?;
+    //                                 cell.stage = UserStage::Init;
+    //                             } else {
+    //                                 cell.delta(&new_state, &mut self.listener)?;    
+    //                             }
+
+    //                         },
+    //                     }
+    //                     cell.state = new_state;
+    //                     (user_id, cell)
+    //                 },
+    //                 None => {
+    //                     let user_id: AStr = new_state.id.clone().into();
+    //                     (
+    //                         user_id.clone(),
+    //                         UserCell {
+    //                             user_id,
+    //                             state: new_state, 
+    //                             tree: Default::default(), 
+    //                             stage: UserStage::Init,
+    //                         }
+    //                     )
+    //                 },
+    //             };
+
+    //             self.users.insert(user_id, cell);
+    //         },
+    //         proto::ServerPushType::UTree(mut tree_state) => {
+    //             let user_id = tree_state.id.take().with_context(||"no user_id in user tree")?;
+    //             let user_id: AStr = user_id.into();
+
+    //             let Some(cell) = self.users.get_mut(&user_id) else {
+    //                 warn!("got user tree but has no user [{user_id}]");
+    //                 return Ok(())
+    //             };
+
+    //             match &cell.stage {
+    //                 UserStage::Init => {
+    //                     cell.tree.push(tree_state);
+    //                 },
+    //                 UserStage::Ready => {
+    //                     self.listener.on_update_user_tree(user_id, tree_state)?;
+    //                 },
+    //             }
+    //         },
+    //         proto::ServerPushType::RTree(tree_state) => {
+    //             self.listener.on_update_room_tree(tree_state)?;
+    //         },
+    //         proto::ServerPushType::RReady(_id) => {
+    //             self.listener.on_room_ready()?;
+    //         },
+    //     }
+    //     Ok(())
+    // }
+
+    // #[trace_result]
+    // #[instrument(skip(self, session, response))]
+    // async fn handle_response(&mut self, session: &mut Session, ack: i64, mut response: proto::ServerResponse) -> Result<()> {
+    //     {
+    //         let handled = self.handle_extra_response(session, ack, &response).await?;
+    //         if handled {
+    //             return Ok(())
+    //         }
+    //     }
+
+    //     let Some(mut handler) = self.response_handlers.remove(&ack) else {
+    //         return Err(anyhow!("Not found response handler, ack [{ack}]"))
+    //     };
+
+    //     let status = response.status.take().unwrap_or_default();
+        
+    //     if status.code == 0 {
+
+    //         handler.on_success(response.typ.with_context(||"no typ field in response")?)?;
+    //     } else {
+    //         handler.on_fail(status.code, status.reason)?;
+    //     }
+
+    //     Ok(())
+    // }
+
+    #[trace_result]
+    async fn try_handle_op(&mut self, session: &mut Session) -> Result<()> {
+        // while let Some(msg) = self.shared.pop_inbox() {
+        //     self.handle_op(session, msg).await?;
+        // }
+
+        self.listener.on_process(session).await.with_context(||"on_process failed")?;
+
+        Self::flush_xfer(&mut session.conn, &mut session.xfer).await?;
+
+        Ok(())
+    }
+
+    #[trace_result]
+    async fn flush_xfer(conn: &mut Conn, xfer: &mut Xfer) -> Result<()> {
+        for packet in xfer.send_iter() {
+            conn.send_packet(packet).await?;
+        }
+
+        for item in xfer.ack_iter() {
+            let packet = item?;
+            conn.send_packet(packet).await?;
+        }
+
+        Ok(())
+    }
+
+
+    #[trace_result]
+    #[instrument(name="reconnect", skip(self, _session))]
+    async fn phase_reconnect(&mut self, _session: &mut Session) -> Result<()> {
+        let (_conn, _raw) = timeout(
+            self.config.advance.connection.max_timeout(), 
+            self.reconnect_loop(),
+        )
+        .await
+        .map_err(|_e|anyhow!(
+            "reach max timeout [{:?}]", 
+            self.config.advance.connection.max_timeout())
+        )??;
+        Ok(())
+    }
+
+    #[trace_result]
+    #[instrument(name="open", skip(self))]
+    async fn phase_open(&mut self) -> Result<Session> {
+
+        // 把执行 open_session 的时间也考虑到 max_timeout 里
+
+        let (conn, raw, xfer) = timeout(
+            self.config.advance.connection.max_timeout(), 
+            self.open_loop(),
+        )
+        .await
+        .map_err(|_e|anyhow!(
+            "reach max timeout [{:?}]", 
+            self.config.advance.connection.max_timeout())
+        )??;
+
+        let packet: proto::PacketRef = serde_json::from_str(raw.as_str())
+            .with_context(||"recv raw but invalid packet")?;
+
+        let rsp = parse_open_response_packet(&packet).with_context(||"parse_open_response_packet failed")?;
+
+        // let rsp = output.into_rsp().with_context(||"into_rsp falied")?;
+
+        let mut session = Session {
+            session_id: rsp.session_id,
+            conn_id: rsp.conn_id,
+            xfer,
+            conn,
+            close_status: Default::default(),
+        };
+
+        info!("opened session [{}], conn_id [{}]", session.session_id, session.conn_id);
+
+        let r = self.listener.on_opened(&mut session).await;
+        if let Err(e) = r {
+            error!("{}", trace_fmt!("on_opened failed", e));
+        }
+
+        Ok(session)
+
+    }
+
+    #[trace_result]
+    async fn open_loop<'a>(&mut self) -> Result<(Conn, PacketRaw, Xfer)> {
+        loop {
+
+            let mut conn = self.connect_loop().await?;
+
+            let r = self.open_session(&mut conn).await;
+
+            match r {
+                Ok((raw, xfer)) => return Ok((conn, raw, xfer)),
+                Err(e) => {
+                    warn!("{}", trace_fmt!("open_session failed", e));
+                    debug!("will retry opening session in [{:?}]", self.config.advance.connection.retry_interval());
+                    self.sleep(self.config.advance.connection.retry_interval()).await?;
+                    continue;
+                },
+            };
+        }
+
+    }
+
+    #[trace_result]
+    async fn reconnect_loop<'a>(&mut self) -> Result<(Conn, PacketRaw)> {
+        loop {
+
+            let mut conn = self.connect_loop().await?;
+
+            let r = self.reconnect_session(&mut conn).await;
+
+            match r {
+                Ok(raw) => return Ok((conn, raw)),
+                Err(e) => {
+                    warn!("{}", trace_fmt!("reconnect_session failed", e));
+                    debug!("will retry opening session in [{:?}]", self.config.advance.connection.retry_interval());
+                    self.sleep(self.config.advance.connection.retry_interval()).await?;
+                    continue;
+                },
+            };
+        }
+
+    }
+
+    #[trace_result]
+    async fn reconnect_session<'a>(&mut self, _conn: &mut Conn) -> Result<PacketRaw> {
+        // TODO: 
+        async_rt::sleep(Duration::from_secs(99999)).await;
+        Err(anyhow!("Not implement"))
+    }
+
+    #[trace_result]
+    async fn connect_loop(&mut self) -> Result<Conn> {
+
+
+        loop {
+            
+            debug!("connecting to [{}]...", self.url);
+            
+            let r = self.connect_to().await;
+
+            let cfg = &self.config.advance.connection;
+
+            match r {
+                Ok(conn) => {
+                    debug!("connected to [{}]", self.url);
+                    return Ok(conn)
+                },
+                Err(e) => {
+                    warn!("{}", trace_fmt!("connect failed", e))
+                }
+            }
+
+            debug!("will retry connecting in [{:?}]", cfg.retry_interval());
+            self.sleep(cfg.retry_interval()).await?;
+        }
+    }
+
+    #[trace_result]
+    async fn connect_to(&mut self) -> Result<Conn> {
+        let cfg = &self.config.advance.connection;
+
+        loop {
+            let r = tokio::select! {
+                r = self.rx.recv() => {
+                    check_guard(r)?;
+                    continue;
+                }
+
+                r = timeout(cfg.connect_timeout(), self.connector.connect(&self.url)) => {
+                    r
+                }
+            };
+
+            let stream = r
+                .map_err(|_e|anyhow!(
+                    "reach connect timeout [{:?}]", 
+                    cfg.connect_timeout())
+                )??;
+
+            return Ok(Conn {
+                    stream,
+                })
+        }
+    }
+
+
+    #[trace_result]
+    async fn open_session<'a>(&mut self, conn: &mut Conn) -> Result<(PacketRaw, Xfer)> {
+
+        self.open_session_send(conn).await.with_context(||"open_session_send failed")?;
+
+        let mut xfer = Xfer::new();
+        self.listener.on_opening(&mut xfer).await?;
+        Self::flush_xfer(conn, &mut xfer).await?;
+
+        loop {
+            let r = self.recv_raw(conn).await.with_context(||"recv_raw failed")?;
+            if let Some(raw) = r {
+                return Ok((raw, xfer))
+            }
+        }
+    }
+
+
+    #[trace_result]
+    async fn open_session_send(&mut self, conn: &mut Conn) -> Result<()> {
+        use crate::proto::IntoIterSerialize;
+
+        let req = proto::OpenSessionRequestSer {
+            user_id: &self.config.user_id,
+            room_id: &self.config.room_id,
+            user_ext: self.config.advance.user_ext.as_deref(),
+            user_tree: self.config.advance.user_tree
+                .as_ref()
+                .map(|x|
+                    x.iter().map(|y|proto::UpdateTreeRequestSer::from(y))
+                    .into_iter_ser()
+                ),
+        };
+
+        let packet = proto::PacketSer {
+            typ: Some(proto::PacketType::Request.as_num()),
+            sn: None, // Open 请求可以没有 sn
+            body: Some(req.into_body()),
+            ack: None, // 
+        };
+
+        conn.send_packet_ser(&packet).await
+            .with_context(||"send_packet failed")?;
+
+        Ok(())
+    }
+
+
+    #[trace_result]
+    async fn recv_packet<'a>(&mut self, conn: &mut Conn, rraw: &'a mut RecvRaw) -> Result<Option<proto::PacketRef<'a>>> {
+        loop {
+            let r = self.recv_raw(conn).await?;
+
+            let Some(raw) = r else {
+                return Ok(None)
+            };
+
+            rraw.raw = raw;
+
+            let packet: proto::PacketRef = serde_json::from_str(&rraw.raw.as_str()).with_context(||"parse packet failed")?;
+
+            return Ok(Some(packet))
+        }
+        
+        // Ok(None)
+    }
+
+    #[trace_result]
+    async fn recv_raw<'a>(&mut self, conn: &mut Conn) -> Result<Option<PacketRaw>> {
+        loop {
+            tokio::select! {
+                r = self.rx.recv() => {
+                    check_guard(r)?;
+                    return Ok(None)
+                }
+
+                r = conn.stream.wait_next_recv() => {
+                    r.with_context(||"wait_next_recv failed")?;
+                }
+            }
+            
+            let r = conn.stream.recv_next_packet().await.with_context(||"wait_next_recv failed")?;
+            
+            let Some(raw) = r else {
+                continue;
+            };
+
+            debug!("recv raw [{}]", raw.as_str());
+
+            return Ok(Some(raw))
+        }
+
+        // Ok(None)
+    }
+
+    #[trace_result]
+    async fn sleep(&mut self, d: Duration) -> Result<bool> {
+
+        let deadline = Instant::now() + d;
+
+        loop {
+            tokio::select! {
+                r = self.rx.recv() => {
+                    check_guard(r)?;
+                }
+
+                _r = async_rt::sleep_until(deadline) => {
+                    return Ok(true)
+                }
+            };
+        }
+    }
+}
+
+
+fn check_guard(r: Option<()>) -> Result<()> {
+    r.with_context(||"got closed")
+}
+
+#[trace_result]
+fn parse_open_response_packet(packet: &proto::PacketRef) -> Result<proto::OpenSessionResponse> {
+    if packet.typ() != Some(proto::PacketType::Response) {
+        return Err(anyhow!("invalid packet type {:?}", packet.typ()))
+    }
+
+    let body = packet.body.as_ref().with_context(||"empty body")?;
+
+    let mut server_rsp: proto::ServerResponse = serde_json::from_str(body).with_context(||"invalid json")?;
+
+    if let Some(status) = server_rsp.status.take() {
+        return status.with_context(||"open response status")
+    }
+
+    let rsp_type = server_rsp.typ.with_context(||"invalid response type")?;
+    match rsp_type {
+        proto::response::ResponseType::Open(rsp) => {
+            Ok(rsp)
+            // Ok(Session {
+            //     session_id: rsp.session_id,
+            //     conn_id: rsp.conn_id,
+            //     xfer: Xfer::new(),
+            // })
+        },
+        _ => {
+            Err(anyhow!("unexpect response type"))
+        }
+    }
+}
+
+pub struct Session {
+    session_id: String,
+    conn_id: String,
+    xfer: Xfer,
+    conn: Conn,
+    close_status: Option<proto::Status>,
+}
+
+impl Session {
+    pub fn session_id(&self) -> &str {
+        &self.session_id
+    }
+    
+    pub fn set_close(&mut self, status: proto::Status) {
+        self.close_status = Some(status);
+    }
+
+    pub fn xfer_mut(&mut self) -> &mut Xfer {
+        &mut self.xfer
+    }
+}
+
+
+
+#[derive(Debug, Default)]
+struct RecvRaw {
+    raw: PacketRaw,
+}
+
+struct Conn {
+    stream: TungStream,
+}
+
+impl Conn {
+
+    #[trace_result]
+    pub async fn send_packet_ser<B>(&mut self, packet: &proto::PacketSer<B>) -> Result<()> 
+    where
+        B: serde::Serialize,
+    {
+        let json = serde_json::to_string(&packet)?;
+        self.send_packet(json).await
+    }
+
+    #[trace_result]
+    pub async fn send_packet(&mut self, text: String) -> Result<()> {
+        debug!("send raw [{}]", text);
+        self.stream.send_text(text).await?;
+        Ok(())
+    }
+
+}
+
+type PacketRaw = tokio_tungstenite::tungstenite::Utf8Bytes;
+
+
+
+
+
+
+
+
+
+pub trait Delegate: Send + Sync + 'static {
+    fn on_opening(&mut self, xfer: &mut Xfer) -> impl Future<Output = Result<()>> + Send;
+    fn on_opened(&mut self, session: &mut Session) -> impl Future<Output = Result<()>> + Send;
+    fn on_closed(&mut self, status: proto::Status) -> impl Future<Output = Result<()>> + Send;
+    fn on_process(&mut self, session: &mut Session) -> impl Future<Output = Result<()>> + Send;
+    fn on_response(&mut self, session: &mut Session, ack: i64, response: proto::ServerResponse) -> impl Future<Output = Result<()>> + Send;
+    fn on_push(&mut self, session: &mut Session, push: proto::ServerPush) -> impl Future<Output = Result<()>> + Send;
+}
+

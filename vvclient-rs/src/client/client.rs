@@ -607,9 +607,9 @@ impl<T: Types> Worker<T> {
 
 
     #[trace_result]
-    #[instrument(skip(self, session))]
-    async fn phase_reconnect(&mut self, session: &mut Session) -> Result<()> {
-        let (conn, raw) = timeout(
+    #[instrument(skip(self, _session))]
+    async fn phase_reconnect(&mut self, _session: &mut Session) -> Result<()> {
+        let (_conn, _raw) = timeout(
             self.config.advance.connection.max_timeout(), 
             self.reconnect_loop(),
         )
@@ -705,7 +705,7 @@ impl<T: Types> Worker<T> {
     }
 
     #[trace_result]
-    async fn reconnect_session<'a>(&mut self, conn: &mut Conn) -> Result<PacketRaw> {
+    async fn reconnect_session<'a>(&mut self, _conn: &mut Conn) -> Result<PacketRaw> {
         async_rt::sleep(Duration::from_secs(99999)).await;
         Err(anyhow!("Not implement"))
     }

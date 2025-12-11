@@ -1,56 +1,133 @@
+use core::fmt;
 
-
-use std::sync::Arc;
-
+use strum_macros::FromRepr;
 use trace_error::anyhow::trace_result;
 
-use crate::{client::{ConnectionConfig, JoinAdvanceArgs, JoinConfig, Listener, ResponseHandler}, kit::astr::AStr, proto::{self, mediasoup}};
+use crate::{client::defines::{ConnectionConfig, JoinAdvanceArgs, JoinConfig}, proto::{self, fmt_writer::JsonDisplay, mediasoup}};
 
-use super::error::Error;
-type Result<T, E = Error> = std::result::Result<T, E>;
+use anyhow::{Result, Error};
+// use super::error::Error;
+// type Result<T, E = Error> = std::result::Result<T, E>;
 
-use crate::glue::error::ForeignError;
-pub type ForeignResult<T, E = ForeignError> = std::result::Result<T, E>;
 
-#[uniffi::export(with_foreign)]
-pub trait OnEvent: Send + Sync + 'static {
-    fn on_opened(&self, session_id: String) -> ForeignResult<()>;
-    
-    fn on_closed(&self, code: i32, reason: String) -> ForeignResult<()>;
-    
-    fn on_request_failed(&self, name: String, code: i32, reason: String) -> ForeignResult<()>;
-    
-    fn on_room_chat(&self, from: String, to: String, body: String) -> ForeignResult<()>;
-    
-    fn on_user_chat(&self, from: String, to: String, body: String) -> ForeignResult<()>;
 
-    // fn on_user_joined(&self, user_id: String, camera_muted: Option<bool>, mic_muted: Option<bool>, screen_muted: Option<bool>, user_tree: Vec<TreeNode>) -> ForeignResult<()>;
+#[derive(uniffi::Record)]
+#[derive(Debug)]
+pub struct SignalConfig {
+    pub user_id: String,
 
-    fn on_user_joined(&self, user_id: String, args: JoinedArgs) -> ForeignResult<()>;
+    pub room_id: String,
 
-    fn on_user_leaved(&self, user_id: String) -> ForeignResult<()>;
-    
-    fn on_add_stream(&self, user_id: String, stype: i32, muted: bool) -> ForeignResult<()>;
+    pub ignore_server_cert: bool,
+}
 
-    fn on_update_stream(&self, user_id: String, stype: i32, muted: bool) -> ForeignResult<()>;
+impl Into<JoinConfig> for SignalConfig {
+    fn into(self) -> JoinConfig {
+        JoinConfig {
+            user_id: self.user_id.into(),
+            room_id: self.room_id.into(),
+            // advance: Default::default(),
+            advance: JoinAdvanceArgs {
+                connection: ConnectionConfig {
+                    ignore_server_cert: self.ignore_server_cert,
+                    ..Default::default()
+                },
+                ..Default::default()
+            },
+        }
+    }
+}
 
-    fn on_remove_stream(&self, user_id: String, stype: i32) -> ForeignResult<()>; 
+pub trait ToBody {
 
-    fn on_update_user_tree(&self, user_id: String, op: TreeNode) -> ForeignResult<()>;
+    fn to_body_typed(&self) -> Result<impl serde::Serialize>;
 
-    fn on_update_room_tree(&self, op: TreeNode) -> ForeignResult<()>;
+    #[trace_result]
+    fn to_body_json(&self) -> Result<String> {
+        let body = serde_json::to_string(&self.to_body_typed()?)?;
+        Ok(body)
+    }
 
-    fn on_room_ready(&self) -> ForeignResult<()>;
 
-    fn on_extra_sub(&self, user_id: String, xid: String, stream_id: String, stype: i32, producer_id: String, consumer_id: String, rtp: Option<String>) -> ForeignResult<()>;
+    #[trace_result]
+    fn to_body(&self) -> Result<impl serde::Serialize + fmt::Display> {
+        Ok(JsonDisplay(self.to_body_typed()?))
+    }
 }
 
 #[derive(uniffi::Record)]
 #[derive(Debug)]
-pub struct JoinedArgs {
-    pub user_tree: Vec<TreeNode>,
+pub struct Status {
+    pub code :i32,
+    pub reason: String,
 }
 
+impl From<proto::Status> for Status {
+    fn from(value: proto::Status) -> Self {
+        Self {
+            code: value.code,
+            reason: value.reason,
+        }
+    }
+}
+
+impl From<Status> for proto::Status {
+    fn from(value: Status) -> Self {
+        Self {
+            code: value.code,
+            reason: value.reason,
+        }
+    }
+}
+
+#[derive(uniffi::Enum)]
+#[derive( Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, FromRepr)]
+#[repr(i32)]
+pub enum StreamType {
+    Camera = 1,
+    Mic = 2,
+    Screen = 3, 
+}
+
+impl StreamType {
+    pub fn from_value(value: i32) -> Result<Self>{
+        Ok(proto::StreamType::from_value(value)?.into())
+    }
+
+    pub fn value(&self) -> i32 {
+        *self as i32
+    }
+
+    pub fn value_str(value: i32) -> Result<&'static str>{
+        proto::StreamType::value_str(value)
+    }
+
+    pub fn as_str(&self) -> &'static str {
+        proto::StreamType::from(*self).as_str()
+    }
+}
+
+
+
+impl From<proto::StreamType> for StreamType {
+    fn from(value: proto::StreamType) -> Self {
+        match value {
+            proto::StreamType::Camera => Self::Camera,
+            proto::StreamType::Mic => Self::Mic,
+            proto::StreamType::Screen => Self::Screen,
+        }
+    }
+}
+
+impl From<StreamType> for proto::StreamType {
+    fn from(value: StreamType) -> Self {
+        match value {
+            StreamType::Camera => proto::StreamType::Camera,
+            StreamType::Mic => proto::StreamType::Mic,
+            StreamType::Screen => proto::StreamType::Screen,
+        }
+    }
+}
 
 #[derive(uniffi::Record)]
 #[derive(Debug)]
@@ -70,212 +147,17 @@ impl From<proto::TreeState> for TreeNode {
     }
 }
 
-
-// impl OnEvent for () {
-//     fn on_opened(&self, session_id: String) -> ForeignResult<()>  {
-//         log::debug!("on_opened: session_id [{session_id}]");
-//         Ok(())
-//     }
-
-//     fn on_closed(&self, code: i32, reason: String) -> ForeignResult<()>  {
-//         log::debug!("on_closed: code [{code}], reason [{reason}]");
-//         Ok(())
-//     }
-// }
-
-pub struct ListenerBridge(pub Arc<dyn OnEvent>);
-
-impl Listener for ListenerBridge {
-    fn on_opened(&mut self, session_id: &str) -> anyhow::Result<()> {
-        self.0.on_opened(session_id.into())?;
-        Ok(())
-    }
-
-    fn on_closed(&mut self, reason: proto::Status) -> anyhow::Result<()> {
-        self.0.on_closed(reason.code, reason.reason)?;
-        Ok(())
-    }
-    
-    fn on_room_chat(&mut self, from: &str, to: &str, body: &str) -> anyhow::Result<()> {
-        self.0.on_room_chat(from.into(), to.into(), body.into())?;
-        Ok(())
-    }
-    
-    fn on_user_chat(&mut self, from: &str, to: &str, body: &str) -> anyhow::Result<()> {
-        self.0.on_user_chat(from.into(), to.into(), body.into())?;
-        Ok(())
-    }
-
-    // fn on_user_joined(&mut self, user_id: &str, camera_muted: Option<bool>, mic_muted: Option<bool>, screen_muted: Option<bool>, tree: Vec<proto::TreeState>) -> anyhow::Result<()> {
-    //     let tree: Vec<_> = tree.into_iter()
-    //         .map(TreeNode::from)
-    //         .collect();
-
-    //     self.0.on_user_joined(user_id.into(), camera_muted, mic_muted, screen_muted, tree)?;
-    //     Ok(())
-    // }
-
-    fn on_user_joined(&mut self, user_id: AStr, tree: Vec<proto::TreeState>) -> anyhow::Result<()> {
-        let user_tree: Vec<_> = tree.into_iter()
-            .map(TreeNode::from)
-            .collect();
-
-        self.0.on_user_joined(user_id.into(), JoinedArgs { user_tree })?;
-        Ok(())
-    }
-    
-    fn on_user_leaved(&mut self, user_id: AStr) -> anyhow::Result<()> {
-        self.0.on_user_leaved(user_id.into())?;
-        Ok(())
-    }
-    
-    fn on_add_stream(&mut self, user_id: AStr, stype: i32, muted: bool) -> anyhow::Result<()> {
-        self.0.on_add_stream(user_id.into(), stype, muted)?;
-        Ok(())
-    }
-    
-    fn on_update_stream(&mut self, user_id: AStr, stype: i32, muted: bool) -> anyhow::Result<()> {
-        self.0.on_update_stream(user_id.into(), stype, muted)?;
-        Ok(())
-    }
-    
-    fn on_remove_stream(&mut self, user_id: AStr, stype: i32) -> anyhow::Result<()> {
-        self.0.on_remove_stream(user_id.into(), stype)?;
-        Ok(())
-    }
-    
-    fn on_update_user_tree(&mut self, user_id: AStr, op: proto::TreeState) -> anyhow::Result<()> {
-        self.0.on_update_user_tree(user_id.into(), op.into())?;
-        Ok(())
-    }
-    
-    fn on_update_room_tree(&mut self, op: proto::TreeState) -> anyhow::Result<()> {
-        self.0.on_update_room_tree(op.into())?;
-        Ok(())
-    }
-    
-    fn on_room_ready(&mut self) -> anyhow::Result<()> {
-        self.0.on_room_ready()?;
-        Ok(())
-    }
-
-    fn on_extra_sub(&mut self, user_id: String, xid: String, stream_id: String, stype: i32, producer_id: String, consumer_id: String, rtp: Option<String>) -> anyhow::Result<()> {
-        self.0.on_extra_sub(user_id, xid, stream_id, stype, producer_id, consumer_id, rtp)?;
-        Ok(())
-    }
+#[derive(uniffi::Record)]
+#[derive(Debug)]
+pub struct ChatArgs {
+    pub from: String,
+    pub to: String,
+    pub body: String,
 }
 
 #[derive(uniffi::Record)]
 #[derive(Debug)]
-pub struct ClientConfig {
-    pub user_id: String,
-
-    pub room_id: String,
-
-    pub ignore_server_cert: bool,
-}
-
-impl Into<JoinConfig> for ClientConfig {
-    fn into(self) -> JoinConfig {
-        JoinConfig {
-            user_id: self.user_id.into(),
-            room_id: self.room_id.into(),
-            // advance: Default::default(),
-            advance: JoinAdvanceArgs {
-                connection: ConnectionConfig {
-                    ignore_server_cert: self.ignore_server_cert,
-                    ..Default::default()
-                },
-                ..Default::default()
-            },
-        }
-    }
-}
-
-// #[uniffi::export(with_foreign)]
-// pub trait OnFail: Send + Sync {
-//     fn on_fail(
-//         &self, 
-//         code: i32,
-//         reason: String,
-//     ) -> ForeignResult<()>;
-// }
-
-// pub struct FailFn<F>(pub F);
-
-// impl<F> OnFail for FailFn<F> 
-// where 
-//     F: Fn(i32, String) -> ForeignResult<()> + Send + Sync,
-// {
-//     fn on_fail(&self, code:i32, reason:String,) -> ForeignResult<()>  {
-//         (self.0)(code, reason)
-//     }
-// }
-
-// pub struct ResponseFn<F>(pub F);
-
-
-// #[uniffi::export(with_foreign)]
-// pub trait OnCreateXResponse: Send + Sync {
-//     fn on_success(
-//         &self, 
-//         response: CreateXResponse,
-//     ) -> ForeignResult<()>;
-// }
-
-
-// impl<F> OnCreateXResponse for ResponseFn<F> 
-// where 
-//     F: Fn(CreateXResponse) -> ForeignResult<()> + Send + Sync,
-// {
-//     fn on_success(&self, response: CreateXResponse) -> ForeignResult<()>  {
-//         (self.0)(response)
-//     }
-// }
-
-#[derive(uniffi::Record)]
-#[derive(Debug)]
-pub struct CreateXRequest {
-
-    /// Room Id
-    pub room_id: String,
-
-    /// 传输通道方向, 见 Direction  
-    pub dir: i32,
-
-    /// 媒体类型, 见 MediaKind
-    pub kind: i32,
-
-    /// 客户端的 Dtls Parameters
-    pub dtls: Option<String>, // ::core::option::Option<DTLS>, // mediasoup::prelude::DtlsParameters
-}
-
-impl CreateXRequest {
-
-    #[trace_result]
-    pub fn to_body(&self) -> Result<String> {
-        let dtls = match &self.dtls {
-            Some(v) => {
-                let typed: mediasoup::prelude::DtlsParameters = serde_json::from_str(v)?;
-                Some(typed)
-            },
-            None => None,
-        };
-
-        let body = serde_json::to_string(&proto::CreateWebrtcTransportRequestSer {
-                room_id: &self.room_id, 
-                dir: self.dir, 
-                kind: self.kind, 
-                dtls: dtls.as_ref(),
-            }.into_msg())?;
-
-        Ok(body)
-    }
-}
-
-#[derive(uniffi::Record)]
-#[derive(Debug)]
-pub struct CreateXResponse {
+pub struct OnCreateXResponse {
     /// Transport Id
     pub xid: ::prost::alloc::string::String,
 
@@ -289,11 +171,18 @@ pub struct CreateXResponse {
     pub dtls: Option<String>, // ::core::option::Option<mediasoup::prelude::DtlsParameters>,
 }
 
-impl TryFrom<proto::CreateWebrtcTransportResponse> for CreateXResponse {
+impl TryFrom<proto::response::ResponseType> for OnCreateXResponse {
     type Error = Error;
 
     #[trace_result]
-    fn try_from(value: proto::CreateWebrtcTransportResponse) -> std::result::Result<Self, Self::Error> {
+    fn try_from(response: proto::response::ResponseType) -> std::result::Result<Self, Self::Error> {
+        let value = match response {
+            proto::response::ResponseType::CreateX(v) => v,
+            _ => {
+                let e = anyhow::anyhow!("Unexpect response of [{}], {response:?}", stringify!(Sub));
+                return Err(e)
+            },
+        };
 
         let ice_param = match &value.ice_param {
             Some(v) => {
@@ -326,7 +215,7 @@ impl TryFrom<proto::CreateWebrtcTransportResponse> for CreateXResponse {
 
 #[derive(uniffi::Record)]
 #[derive(Debug)]
-pub struct ConnXRequest {
+pub struct ConnXCall {
 
     /// Room Id
     pub xid: String,
@@ -335,10 +224,10 @@ pub struct ConnXRequest {
     pub dtls: Option<String>, // mediasoup::prelude::DtlsParameters
 }
 
-impl ConnXRequest {
+impl ToBody for ConnXCall {
 
     #[trace_result]
-    pub fn to_body(&self) -> Result<String> {
+    fn to_body_typed(&self) -> Result<impl serde::Serialize> {
         let dtls = match &self.dtls {
             Some(v) => {
                 let typed: mediasoup::prelude::DtlsParameters = serde_json::from_str(v)?;
@@ -347,77 +236,55 @@ impl ConnXRequest {
             None => None,
         };
 
-        let body = serde_json::to_string(&proto::ConnectWebrtcTransportRequestSer {
+        Ok(proto::ConnectWebrtcTransportRequestSer {
                 xid: &self.xid,
-                dtls: dtls.as_ref(),
-            }.into_msg())?;
-
-        Ok(body)
+                dtls,
+            }.into_msg())
     }
 }
 
 
+
 #[derive(uniffi::Record)]
 #[derive(Debug)]
-pub struct ConnXResponse {
+pub struct ConnXReturn {
 
 }
 
-impl TryFrom<proto::ConnectWebrtcTransportResponse> for ConnXResponse {
+impl TryFrom<proto::response::ResponseType> for ConnXReturn {
     type Error = Error;
 
     #[trace_result]
-    fn try_from(_value: proto::ConnectWebrtcTransportResponse) -> std::result::Result<Self, Self::Error> {
+    fn try_from(response: proto::response::ResponseType) -> std::result::Result<Self, Self::Error> {
+        match response {
+            proto::response::ResponseType::ConnX(_rsp) => {
+                Result::<_>::Ok(Self {
 
-        Ok(Self {
-
-        })
+                })
+            }
+            _ => {
+                let e = anyhow::anyhow!("Unexpect response of [{}], {response:?}", stringify!(ConnX));
+                return Err(e)
+            },
+        }
     }
 }
 
 
 
-// #[uniffi::export(with_foreign)]
-// pub trait OnConnXResponse: Send + Sync {
-//     fn on_success(
-//         &self, 
-//         response: ConnXResponse,
-//     ) -> ForeignResult<()>;
-// }
-
-
-
 #[derive(uniffi::Record)]
 #[derive(Debug)]
-pub struct PubRequest {
-
-    /// Room Id
-    pub room_id: String,
-    
-    /// 发送通道 Transport Id
-    pub xid: String,
-    
-    pub stream_id: String,
-    
-    /// 媒体类型, 见 MediaKind
-    // pub kind: i32,
-
-    /// 媒体流类型
-    pub stype: i32,
-
-    /// Rtp Parameters
-    pub rtp: Option<String>, // mediasoup::prelude::RtpParameters
-
-    /// 音频类型, 见 AudioType
-    pub audio_type: i32,
-
-    pub muted: ::core::option::Option<bool>,
+pub struct PubCall {
+    pub x_id: String,
+    pub stype: StreamType,
+    pub rtp: Option<String>,
+    pub muted: Option<bool>,
 }
 
-impl PubRequest {
+impl ToBody for PubCall {
 
     #[trace_result]
-    pub fn to_body(&self) -> Result<String> {
+    fn to_body_typed(&self) -> Result<impl serde::Serialize> {
         let rtp = match &self.rtp {
             Some(v) => {
                 let typed: mediasoup::prelude::RtpParameters = serde_json::from_str(v)?;
@@ -426,22 +293,22 @@ impl PubRequest {
             None => None,
         };
 
-        let body = serde_json::to_string(&proto::PublishRequestSer {
-                room_id: &self.room_id,
+        let body = proto::PublishRequestSer {
+                room_id: "".into(),
                 
-                xid: &self.xid,
+                xid: &self.x_id,
                 
-                stream_id: &self.stream_id,
+                stream_id: self.stype.as_str(),
 
-                stype: self.stype,
+                stype: self.stype.value(),
 
-                rtp: rtp.as_ref(),
+                rtp,
 
-                audio_type: self.audio_type,
+                audio_type: 0,
 
                 muted: self.muted,
                 
-            }.into_msg())?;
+            }.into_msg();
 
         Ok(body)
     }
@@ -450,46 +317,49 @@ impl PubRequest {
 
 #[derive(uniffi::Record)]
 #[derive(Debug)]
-pub struct PubResponse {
+pub struct PubReturn {
     pub producer_id: String,
 }
 
-impl TryFrom<proto::PublishResponse> for PubResponse {
+impl TryFrom<proto::response::ResponseType> for PubReturn {
     type Error = Error;
 
     #[trace_result]
-    fn try_from(value: proto::PublishResponse) -> std::result::Result<Self, Self::Error> {
-
-        Ok(Self {
-            producer_id: value.producer_id,
-        })
+    fn try_from(response: proto::response::ResponseType) -> std::result::Result<Self, Self::Error> {
+        match response {
+            proto::response::ResponseType::Pub(rsp) => {
+                Result::<_>::Ok(Self {
+                    producer_id: rsp.producer_id,
+                })
+            }
+            _ => {
+                let e = anyhow::anyhow!("Unexpect response of [{}], {response:?}", stringify!(Pub));
+                return Err(e)
+            },
+        }
     }
 }
 
 
 #[derive(uniffi::Record)]
 #[derive(Debug)]
-pub struct UPubRequest {
-    /// Room Id
-    pub room_id: ::prost::alloc::string::String,
-
-    /// 生产者 Id
-    pub producer_id: Option<String>,
-
-    /// 媒体流 Id （和生产者 Id 二选一）
-    pub stream_id: Option<String>,
+pub struct UPubCall {
+    pub stype: StreamType,
 }
 
-impl UPubRequest {
+impl ToBody for UPubCall {
 
     #[trace_result]
-    pub fn to_body(&self) -> Result<String> {
+    fn to_body_typed(&self) -> Result<impl serde::Serialize> {
 
-        let body = serde_json::to_string(&proto::UnPublishRequestSer {
-                room_id: &self.room_id,
-                producer_id: self.producer_id.as_deref(),
-                stream_id: self.stream_id.as_deref(),
-            }.into_msg())?;
+        let body = proto::UnPublishRequestSer {
+                room_id: "".into(),
+
+                producer_id: None,
+                
+                stream_id: Some(self.stype.as_str()),
+                
+            }.into_msg();
 
         Ok(body)
     }
@@ -498,113 +368,149 @@ impl UPubRequest {
 
 #[derive(uniffi::Record)]
 #[derive(Debug)]
-pub struct UPubResponse {
-
+pub struct UPubReturn {
+    
 }
 
-impl TryFrom<proto::UnPublishResponse> for UPubResponse {
+impl TryFrom<proto::response::ResponseType> for UPubReturn {
     type Error = Error;
 
     #[trace_result]
-    fn try_from(_value: proto::UnPublishResponse) -> std::result::Result<Self, Self::Error> {
-
-        Ok(Self {
-
-        })
+    fn try_from(response: proto::response::ResponseType) -> std::result::Result<Self, Self::Error> {
+        match response {
+            proto::response::ResponseType::UPub(_rsp) => {
+                Result::<_>::Ok(Self {
+                    
+                })
+            }
+            _ => {
+                let e = anyhow::anyhow!("Unexpect response of [{}], {response:?}", stringify!(UPub));
+                return Err(e)
+            },
+        }
     }
 }
 
 
+
 #[derive(uniffi::Record)]
 #[derive(Debug)]
-pub struct MuteRequest {
+pub struct MuteCall {
     
-    pub room_id: String,
-
-    pub producer_id: Option<String>,
-
-    pub stream_id: Option<String>,
+    pub stype: StreamType,
 
     pub muted: bool,
 }
 
-impl MuteRequest {
-
+impl ToBody for MuteCall {
     #[trace_result]
-    pub fn to_body(&self) -> Result<String> {
-
-        let body = serde_json::to_string(&proto::MuteRequestSer {
-                room_id: &self.room_id,
-                producer_id: self.producer_id.as_deref(),
-                stream_id: self.stream_id.as_deref(),
+    fn to_body_typed(&self) -> Result<impl serde::Serialize> {
+        let body = proto::MuteRequestSer {
+                room_id: "",
+                producer_id: None,
+                stream_id: Some(self.stype.as_str()),
                 muted: self.muted,
-            }.into_msg())?;
-
+            }.into_msg();
         Ok(body)
     }
 }
 
 #[derive(uniffi::Record)]
 #[derive(Debug)]
-pub struct MuteResponse {
+pub struct MuteReturn {
 
 }
 
-impl TryFrom<proto::MuteResponse> for MuteResponse {
+impl TryFrom<proto::response::ResponseType> for MuteReturn {
     type Error = Error;
 
     #[trace_result]
-    fn try_from(_value: proto::MuteResponse) -> std::result::Result<Self, Self::Error> {
-
-        Ok(Self {
-
-        })
+    fn try_from(response: proto::response::ResponseType) -> std::result::Result<Self, Self::Error> {
+        match response {
+            proto::response::ResponseType::Mute(_rsp) => {
+                Result::<_>::Ok(Self {
+                    
+                })
+            }
+            _ => {
+                let e = anyhow::anyhow!("Unexpect response of [{}], {response:?}", stringify!(Mute));
+                return Err(e)
+            },
+        }
     }
 }
 
 
-pub trait IntoHandler {
-    fn into_handler(self) -> Box<dyn ResponseHandler>;
+
+#[derive(uniffi::Record)]
+#[derive(Debug)]
+pub struct SubCall {
+    pub user_id: String,
+    pub stype: StreamType,
 }
 
-// impl IntoHandler for Arc<dyn OnCreateXResult> {
-//     fn into_handler(self) -> Box<dyn ResponseHandler> {
-//         Box::new(CreateXResponseHandler {
-//             cb: self
-//         })
+// impl ToBody for SubCall {
+
+//     #[trace_result]
+//     fn to_body_typed(&self) -> Result<impl serde::Serialize> {
+//         let body = proto::SubscribeRequestSer {
+
+                
+//             }.into_msg();
+
+//         Ok(body)
 //     }
 // }
 
-// #[uniffi::export(with_foreign)]
-// pub trait OnCreateXResult: Send + Sync {
-//     fn resolve(&self, response: CreateXResponse) -> ForeignResult<()>;
 
-//     fn reject(&self, code: i32, reason: String) -> ForeignResult<()>;
-// }
+#[derive(uniffi::Record)]
+#[derive(Debug)]
+pub struct SubReturn {
+    pub x_id: String,
 
+    pub consumer_id: String,
 
-// pub struct CreateXResponseHandler {
-//     cb: Arc<dyn OnCreateXResult>,
-// }
+    pub producer_id: String,
 
-// impl ResponseHandler for CreateXResponseHandler {
-//     fn on_success(self, response: proto::response::ResponseType)-> anyhow::Result<()> {
+    /// Rtp Parameters
+    pub rtp: Option<String>, // Option<mediasoup::prelude::RtpParameters>,
+}
+
+impl SubReturn {
+    pub fn try_new(x_id: String, producer_id: String, response: proto::response::ResponseType) -> Result<Self> {
+        match response {
+            proto::response::ResponseType::Sub(rsp) => {
+                Result::<_>::Ok(Self {
+                    consumer_id: rsp.consumer_id,
+                    rtp: rsp.rtp.map(|x|serde_json::to_string(&x)).transpose()?,
+                    x_id, 
+                    producer_id,
+                })
+            }
+            _ => {
+                let e = anyhow::anyhow!("Unexpect response of [{}], {response:?}", stringify!(Sub));
+                return Err(e)
+            },
+        }
+    }
+}
+
+// impl TryFrom<proto::response::ResponseType> for SubReturn {
+//     type Error = Error;
+
+//     #[trace_result]
+//     fn try_from(response: proto::response::ResponseType) -> std::result::Result<Self, Self::Error> {
 //         match response {
-//             proto::response::ResponseType::CreateX(rsp) => {
-//                 self.cb.resolve(rsp.try_into()?)?;
-//                 Ok(())
-//             } 
-//             _ => unreachable!("Not expect response {response:?}") 
+//             proto::response::ResponseType::Sub(rsp) => {
+//                 Result::<_>::Ok(Self {
+//                     consumer_id: rsp.consumer_id,
+//                     rtp: rsp.rtp.map(|x|serde_json::to_string(&x)).transpose()?,
+//                 })
+//             }
+//             _ => {
+//                 let e = anyhow::anyhow!("Unexpect response of [{}], {response:?}", stringify!(Sub));
+//                 return Err(e)
+//             },
 //         }
 //     }
-
-//     fn on_fail(self, code: i32, reason: String) -> anyhow::Result<()> {
-//         self.cb.reject(code, reason)?;
-//         Ok(())
-//     }
 // }
-
-
-
-
-

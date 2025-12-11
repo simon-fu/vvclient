@@ -6,6 +6,10 @@ use tokio::{select, sync::mpsc};
 use trace_error::anyhow::trace_result;
 use vvclient::kit::async_rt;
 
+use vvclient::glue::client::*;
+use vvclient::glue::defines::*;
+use vvclient::glue::error::ForeignResult;
+
 #[trace_result]
 fn main() -> Result<()> {
     
@@ -65,9 +69,9 @@ async fn run_client() -> Result<()> {
     let room_id = String::from("room01");
     let user_id = String::from("user01");
 
-    let client = vvclient::glue::client::make_client(
+    let client = vvclient::glue::client::make_signal_client(
         url.into(), 
-        vvclient::glue::defines::ClientConfig {
+        SignalConfig {
             user_id: user_id.clone(),
             room_id: room_id.clone(),
             ignore_server_cert: true,
@@ -75,16 +79,16 @@ async fn run_client() -> Result<()> {
         std::sync::Arc::new(ListenerImpl {tx}),
     )?;
 
-    let request = vvclient::glue::defines::CreateXRequest {
-            room_id: room_id.clone(), 
-            dir: 0, 
-            kind: 0, 
-            dtls: None,
-        };
+    // let request = vvclient::glue::defines::CreateXRequest {
+    //         room_id: room_id.clone(), 
+    //         dir: 0, 
+    //         kind: 0, 
+    //         dtls: None,
+    //     };
 
-    log::debug!("create_transport {request:?} ...");
+    // log::debug!("create_transport {request:?} ...");
 
-    client.create_x(request, std::sync::Arc::new(()))?;
+    // client.create_x(request, std::sync::Arc::new(()))?;
 
     // client.create_x(
     //     request, 
@@ -145,103 +149,90 @@ struct ListenerImpl {
 //     }
 // }
 
-impl vvclient::glue::defines::OnEvent for ListenerImpl {
+
+
+impl vvclient::glue::client::Listener for ListenerImpl {
 
     #[tracing::instrument(skip(self))]
-    fn on_opened(&self, session_id: String) -> vvclient::glue::defines::ForeignResult<()> {
-        // log::debug!("got on_opened: session_id [{session_id}]");
+    fn on_opened(&self, args: OnOpenedArgs) -> ForeignResult<()> {
         log::debug!("");
         Ok(())
     }
 
     #[tracing::instrument(skip(self))]
-    fn on_closed(&self, code: i32, reason: String) -> vvclient::glue::defines::ForeignResult<()> {
-        // log::debug!("got on_closed: status [{:?}]", (&code, &reason));
+    fn on_closed(&self, args: OnClosedArgs) -> ForeignResult<()> {
         log::debug!("");
         let _r = self.tx.try_send(());
         Ok(())
     }
-    
-    #[tracing::instrument(skip(self))]
-    fn on_request_failed(&self, name:String, code:i32, reason:String) -> vvclient::glue::defines::ForeignResult<()>  {
-        // log::debug!("got on_request_faild: status [{:?}], name [{name}]", (&code, &reason));
-        log::debug!("");
-        Ok(())
-    }
-    
-    #[tracing::instrument(skip(self))]
-    fn on_room_chat(&self, from:String, to:String, body:String) -> vvclient::glue::defines::ForeignResult<()>  {
-        // log::debug!("got on_room_chat: from [{from}], to [{to}], body [{body}]");
-        log::debug!("");
-        Ok(())
-    }
-    
-    #[tracing::instrument(skip(self))]
-    fn on_user_chat(&self, from:String, to:String, body:String) -> vvclient::glue::defines::ForeignResult<()>  {
-        // log::debug!("got on_user_chat: from [{from}], to [{to}], body [{body}]");
-        log::debug!("");
-        Ok(())
-    }
-    
-    // #[tracing::instrument(skip(self))]
-    // fn on_user_joined(&self, user_id: String, camera_muted: Option<bool>, mic_muted: Option<bool>, screen_muted: Option<bool>, user_tree: Vec<vvclient::glue::defines::TreeNode>) -> vvclient::glue::defines::ForeignResult<()> {
-    //     log::debug!("");
-    //     Ok(())
-    // }
 
     #[tracing::instrument(skip(self))]
-    fn on_user_joined(&self, user_id: String, args: vvclient::glue::defines::JoinedArgs) -> vvclient::glue::defines::ForeignResult<()> {
+    fn on_created_x(&self, args: OnCreatedXArgs) -> ForeignResult<()> {
+        log::debug!("");
+        Ok(())
+    }
+        
+    #[tracing::instrument(skip(self))]
+    fn on_room_chat(&self, args: OnRoomChatArgs) -> ForeignResult<()>  {
         log::debug!("");
         Ok(())
     }
     
     #[tracing::instrument(skip(self))]
-    fn on_user_leaved(&self, user_id:String) -> vvclient::glue::defines::ForeignResult<()>  {
+    fn on_user_chat(&self, args: OnUserChatArgs) -> ForeignResult<()>  {
+        log::debug!("");
+        Ok(())
+    }
+    
+
+    #[tracing::instrument(skip(self))]
+    fn on_user_joined(&self, args: OnUserJoinedArgs) -> ForeignResult<()> {
         log::debug!("");
         Ok(())
     }
     
     #[tracing::instrument(skip(self))]
-    fn on_add_stream(&self, user_id: String, stype:i32, muted:bool) -> vvclient::glue::defines::ForeignResult<()>  {
+    fn on_user_leaved(&self, args: OnUserLeavedArgs) -> ForeignResult<()>  {
         log::debug!("");
         Ok(())
     }
     
     #[tracing::instrument(skip(self))]
-    fn on_update_stream(&self, user_id: String, stype:i32, muted:bool) -> vvclient::glue::defines::ForeignResult<()>  {
+    fn on_add_stream(&self, args: OnAddStreamArgs) -> ForeignResult<()>  {
         log::debug!("");
         Ok(())
     }
     
     #[tracing::instrument(skip(self))]
-    fn on_remove_stream(&self, user_id: String, stype:i32) -> vvclient::glue::defines::ForeignResult<()>  {
+    fn on_update_stream(&self, args: OnUpdateStreamArgs) -> ForeignResult<()>  {
         log::debug!("");
         Ok(())
     }
     
     #[tracing::instrument(skip(self))]
-    fn on_update_user_tree(&self, user_id:String, op: vvclient::glue::defines::TreeNode) -> vvclient::glue::defines::ForeignResult<()>  {
+    fn on_remove_stream(&self, args: OnRemoveStreamArgs) -> ForeignResult<()>  {
         log::debug!("");
         Ok(())
     }
     
     #[tracing::instrument(skip(self))]
-    fn on_update_room_tree(&self, op: vvclient::glue::defines::TreeNode) -> vvclient::glue::defines::ForeignResult<()>  {
+    fn on_update_user_tree(&self, args: OnUpdateUserTreeArgs) -> ForeignResult<()>  {
         log::debug!("");
         Ok(())
     }
     
     #[tracing::instrument(skip(self))]
-    fn on_room_ready(&self) -> vvclient::glue::defines::ForeignResult<()>  {
+    fn on_update_room_tree(&self, args: OnUpdateRoomTreeArgs) -> ForeignResult<()>  {
+        log::debug!("");
+        Ok(())
+    }
+    
+    #[tracing::instrument(skip(self))]
+    fn on_room_ready(&self) -> ForeignResult<()>  {
         log::debug!("");
         Ok(())
     }
 
-    #[tracing::instrument(skip(self))]
-    fn on_extra_sub(&self,user_id:String,xid:String,stream_id:String,stype:i32, producer_id: String,consumer_id:String,rtp:Option<String>) -> vvclient::glue::defines::ForeignResult<()> {
-        log::debug!("");
-        Ok(())
-    }
 }
 
 

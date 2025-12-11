@@ -63,6 +63,7 @@ regex = "1.12.2"
 trace-error = {path = "../trace-error"}
 paste = "1.0.15"
 const_format = "0.2.35"
+auto_impl = "1.3.0"
 
 [target.'cfg(target_os = "android")'.dependencies]
 # android_logger = "0.15"

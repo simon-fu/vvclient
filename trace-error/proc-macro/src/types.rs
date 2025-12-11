@@ -52,7 +52,7 @@ impl Tracable for Anyhow {
         let new_tokens = match context {
             Some(context) => {
                 quote_spanned! { span =>
-                    ( #error )
+                    ::anyhow::Error::from( #error )
                         .context(concat!(
                             "at ", file!(), ":", line!(), ":", column!(), ", ",
                             stringify!(#fn_name), "()"
@@ -62,7 +62,7 @@ impl Tracable for Anyhow {
             }
             None => {
                 quote_spanned! { span =>
-                    ( #error )
+                    ::anyhow::Error::from( #error )
                         .context(concat!(
                             "at ", file!(), ":", line!(), ":", column!(), ", ",
                             stringify!(#fn_name), "()"

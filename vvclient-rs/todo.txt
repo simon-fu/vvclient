@@ -1,7 +1,13 @@
+client
+=======
+- [ ] 处理可恢复错误，比如订阅的时候流不存在，可能已经被取消发布。
+- [ ] 处理不可恢复错误，比如发布失败，update tree 失败等。
+- [ ] 断网重连
+- [ ] 主动/被动退出会议
 
 android jni
 ===========
-- [ ] 回调到 kotlin/java
+- [x] 回调到 kotlin/java
 - [ ] 删除过期日志 （用rust，初始化时启动一个后台task扫描删除）
 - [x] 日志 tracing span
 - [x] 输出日志到 文件 和 logcat

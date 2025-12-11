@@ -133,7 +133,8 @@ pub struct CreateWebrtcTransportRequestSer<'a, DTLS> {
     pub kind: i32,
 
     /// 客户端的 Dtls Parameters
-    pub dtls: ::core::option::Option<DTLS>, // mediasoup::prelude::DtlsParameters
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub dtls: Option<DTLS>, // mediasoup::prelude::DtlsParameters
 }
 
 impl<'a, DTLS> CreateWebrtcTransportRequestSer<'a, DTLS> {
@@ -143,9 +144,9 @@ impl<'a, DTLS> CreateWebrtcTransportRequestSer<'a, DTLS> {
         }
     }
 
-    // pub fn into_body(self) -> JsonDisplay<ClientRequestSer<CreateXTypeSer<Self>>> {
-    //     JsonDisplay(self.into_msg())
-    // }
+    pub fn into_body(self) -> JsonDisplay<ClientRequestSer<CreateXTypeSer<Self>>> {
+        JsonDisplay(self.into_msg())
+    }
 }
 
 #[derive(serde::Serialize, Clone, PartialEq, Debug)]
@@ -161,7 +162,8 @@ pub struct ConnectWebrtcTransportRequestSer<'a, DTLS> {
     pub xid: &'a str,
 
     /// Client Dtls Parameters
-    pub dtls: ::core::option::Option<DTLS>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub dtls: Option<DTLS>,
 }
 
 impl<'a, DTLS> ConnectWebrtcTransportRequestSer<'a, DTLS> {
@@ -237,7 +239,8 @@ pub struct PublishRequestSer<'a, RTP> {
     /// 音频类型, 见 AudioType
     pub audio_type: i32,
 
-    pub muted: ::core::option::Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub muted: Option<bool>,
 
 }
 
@@ -261,9 +264,11 @@ pub struct UnPublishRequestSer<'a> {
     pub room_id: &'a str,
 
     /// 生产者 Id
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub producer_id: Option<&'a str>,
 
     /// 媒体流 Id （和生产者 Id 二选一）
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub stream_id: Option<&'a str>,
 
 }
@@ -289,8 +294,10 @@ pub struct MuteRequestSer<'a> {
     
     pub room_id: &'a str,
 
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub producer_id: Option<&'a str>,
 
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub stream_id: Option<&'a str>,
 
     pub muted: bool,
@@ -310,6 +317,43 @@ pub enum MuteTypeSer<T> {
     Mute(T),
 }
 
+
+#[derive(serde::Serialize, Clone, PartialEq, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct SubscribeRequestSer<'a> {
+    /// Room Id
+    pub room_id: &'a str,
+
+    /// 流id
+    pub stream_id: &'a str,
+
+    /// 生产者 Id
+    pub producer_id: &'a str,
+
+    /// 接收通道 Transport Id
+    pub xid: &'a str,
+
+    /// 空间层/时间层
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub preferred_layers: Option<super::PreferredLayers>,
+}
+
+impl<'a> SubscribeRequestSer<'a> {
+    pub fn into_msg(self) -> ClientRequestSer<SubTypeSer<Self>> {
+        ClientRequestSer {
+            typ: SubTypeSer::Sub(self)
+        }
+    }
+
+    pub fn into_body(self) -> JsonDisplay<ClientRequestSer<SubTypeSer<Self>>> {
+        JsonDisplay(self.into_msg())
+    }
+}
+
+#[derive(serde::Serialize, Clone, PartialEq, Debug)]
+pub enum SubTypeSer<T> {
+    Sub(T),
+}
 
 
 pub trait IntoIterSerialize {

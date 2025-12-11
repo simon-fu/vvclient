@@ -160,7 +160,7 @@ where
 pub fn spawn_with_span<T>(span: tracing::Span, fut: T) -> tokio::task::JoinHandle<T::Output>
 where
     T: std::future::Future + Send + 'static,
-    T::Output: Send + 'static,
+    T::Output: Send ,
 {
     spawn(tracing::Instrument::instrument(fut, span))
     // tokio::spawn(tracing::Instrument::instrument(fut, span))

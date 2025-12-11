@@ -1,6 +1,6 @@
 use std::collections::VecDeque;
 
-use crate::proto::{IdRef, PacketRef, PacketType, ServerPushRef, ServerResponseRef, Status};
+use crate::proto::{IdRef, PacketRef, PacketSer, PacketType, ServerPushRef, ServerResponseRef, Status};
 
 use anyhow::Result;
 
@@ -71,11 +71,21 @@ impl Xfer {
         self.add_qos1_json(typ, &body_json, msg_id)
     }
 
-    pub fn add_qos1_json(&mut self, typ: PacketType, body_json: &str, msg_id: Option<i64>) -> Result<i64> {
+    pub fn add_qos1_json<B: core::fmt::Display + serde::Serialize>(&mut self, typ: PacketType, body_json: B, msg_id: Option<i64>) -> Result<i64> {
         let sn = self.tail_sn + 1;
 
-        let mut packet = PacketRef::qos1(sn, typ, body_json);
-        self.fill_ack(msg_id, &mut packet);
+
+        let mut packet = PacketSer {
+            sn: Some(sn),
+            typ: Some(typ.as_num()),
+            body: Some(body_json),
+            ack: None,
+        };
+
+        packet.ack = self.fill_ack(msg_id);
+
+        // let mut packet = PacketRef::qos1(sn, typ, body_json);
+        // self.fill_ack(msg_id, &mut packet);
 
         let packet_json = serde_json::to_string(&packet)?;
 
@@ -86,18 +96,20 @@ impl Xfer {
         Ok(sn)
     }
 
-    fn fill_ack(&mut self, msg_id: Option<i64>, packet: &mut PacketRef) {
+    fn fill_ack(&mut self, msg_id: Option<i64>) -> Option<i64> {
         match msg_id {
             Some(ack) => {
-                packet.ack = Some(ack);
                 if self.sent_ack_sn < ack {
                     self.sent_ack_sn = ack;
                 }
+                Some(ack)
             },
             None => {
                 if self.sent_ack_sn < self.recv_sn {
-                    packet.ack = Some(self.recv_sn);
                     self.sent_ack_sn = self.recv_sn;
+                    Some(self.recv_sn)
+                } else {
+                    None
                 }
             },
         }
@@ -210,7 +222,7 @@ impl Xfer {
         let body = serde_json::to_string(body)?;
         let mut packet = PacketRef::qos0(typ, &body);
         packet.sn = Some(sn);
-        self.fill_ack(None, &mut packet);
+        packet.ack = self.fill_ack(None);
         let json = serde_json::to_string(&packet)?;
 
         self.tail_sn = sn;

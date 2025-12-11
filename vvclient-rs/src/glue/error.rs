@@ -55,3 +55,5 @@ impl From<uniffi::UnexpectedUniFFICallbackError> for ForeignError {
         Self::Unexpected(value.reason)
     }
 }
+
+pub type ForeignResult<T, E = ForeignError> = std::result::Result<T, E>;

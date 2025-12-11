@@ -878,6 +878,10 @@ pub enum Direction {
     Outbound = 1,
 }
 impl Direction {
+    pub fn value(&self) -> i32 {
+        *self as i32
+    }
+    
     /// String value of the enum field names used in the ProtoBuf definition.
     ///
     /// The values are not transformed in any way and thus are considered stable
@@ -1163,8 +1167,24 @@ pub enum StreamType {
 }
 
 impl StreamType {
+    pub fn from_value(value: i32) -> Result<Self>{
+        Self::from_repr(value).with_context(||format!("invalid StreamType [{value}]"))
+    }
+
     pub fn value(&self) -> i32 {
         *self as i32
+    }
+
+    pub fn value_str(value: i32) -> Result<&'static str>{
+        Self::from_value(value).map(|x|x.as_str())
+    }
+
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            StreamType::Camera => "camera",
+            StreamType::Mic => "mic",
+            StreamType::Screen => "screen",
+        }
     }
 }
 

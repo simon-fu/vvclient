@@ -1,269 +1,818 @@
-use std::sync::Arc;
+
+use anyhow::Result;
+
+use const_format::formatcp;
+
+use log::{debug, warn};
+
+use parking_lot::Mutex;
+
+use tracing::instrument;
 
 use trace_error::anyhow::trace_result;
 
+use core::fmt;
 
-use crate::client::{Client as Core, ResponseHandler, Types};
-// use crate::glue::defines::{ClientConfig, ConnXRequest, CreateXRequest, IntoHandler as _, ListenerBridge, OnConnXResult, OnCreateXResult, OnEvent};
-use crate::glue::defines::*;
-use crate::proto;
+use std::{collections::{HashMap, VecDeque}, sync::Arc};
 
+use crate::{client::xfer::Xfer, kit::astr::AStr, proto};
+
+use crate::client::worker::{Delegate, Session, Worker};
+
+use super::defines as records;
 
 use super::error::Error;
-type Result<T, E = Error> = std::result::Result<T, E>;
+type GlueResult<T, E = Error> = std::result::Result<T, E>;
+
+use crate::glue::error::ForeignResult;
+// use crate::glue::error::ForeignError;
+// pub type ForeignResult<T, E = ForeignError> = std::result::Result<T, E>;
 
 
 #[uniffi::export]
 #[trace_result]
-pub fn make_client(url: String, config: ClientConfig, on_event: Arc<dyn OnEvent>) -> Result<Client> {
+pub fn make_signal_client(url: String, config: records::SignalConfig, listener: Arc<dyn Listener>) -> GlueResult<SignalClient> {
 
-    let core: Core<TypesImpl> = Core::try_new(url, None, config.into(), ListenerBridge(on_event.clone()))?;
+    let delegate = DelegateImpl {
+        listener, 
+        shared: Default::default(),
+        users: Default::default(),
+        response_handlers: Default::default(),
+        dlink_x_id: Default::default(),
+    };
 
-    Ok(Client {
-        core,
-        on_event,
+    let shared = delegate.shared.clone();
+
+    let worker = Worker::try_new(url, None, config.into(), delegate)?;
+
+    Ok(SignalClient {
+        worker,
+        shared,
     })
 }
 
-
 #[derive(uniffi::Object)]
-pub struct Client {
-    core: Core<TypesImpl>,
-    on_event: Arc<dyn OnEvent>,
+pub struct SignalClient {
+    worker: Worker,
+    shared: Arc<Shared<Arc<dyn Listener>>>,
 }
 
-impl Client {
-    pub async fn into_finish(self) {
-        self.core.into_finish().await
+
+#[uniffi::export]
+impl SignalClient {
+
+    #[trace_result]
+    pub fn leave_room(&self, status: records::Status) {
+        let r = self.commit_op(Op::Leave(status));
+        if let Err(e) = r {
+            warn!("{}", trace_fmt!("close failed", e));
+        }
+    }
+
+    #[trace_result]
+    pub fn conn_x(&self, req: records::ConnXCall, cb: Arc<dyn CbResolveConnX>) -> GlueResult<()> {
+        self.simple_request(req, move |rsp| cb.resolve(rsp))?;
+        Ok(())
+    }
+
+    /// return fake producer_id
+    #[trace_result]
+    pub fn pub_stream(&self, req: records::PubCall, cb: Arc<dyn CbResolvePub>) -> GlueResult<String> {
+        let next_id = 0; // TODO: aaa
+        let fake_producer_id = format!("{}_{}", req.stype.as_str(), next_id);
+        self.simple_request(req, move |rsp| cb.resolve(rsp))?;
+        Ok(fake_producer_id)
+    }
+
+    #[trace_result]
+    pub fn upub_stream(&self, req: records::UPubCall, cb: Arc<dyn OnResolveUPub>) -> GlueResult<()> {
+        self.simple_request(req, move |rsp| cb.resolve(rsp))?;
+        Ok(())
+    }
+    
+
+    #[trace_result]
+    pub fn mute_stream(&self, req: records::MuteCall, cb: Arc<dyn CbResolveMute>) -> GlueResult<()> {
+        self.simple_request(req, move |rsp| cb.resolve(rsp))?;
+        Ok(())
+    }
+
+    #[trace_result]
+    pub fn sub_stream(&self, req: records::SubCall, cb: Arc<dyn CbResolveSub>) -> GlueResult<()> {
+
+        self.commit_op(Op::Request(Box::new(move |delegate, session| {
+            let user = delegate.users.get(req.user_id.as_str()).with_context(||format!("Not found user"))?;
+
+            let x_id = delegate.dlink_x_id.as_ref().with_context(||"no dlink_x_id")?.clone();
+
+            let (stream_id, stream) = user.state.streams.iter()
+                .find(|x| x.1.stype == req.stype.value())
+                .with_context(||format!("can't find stream for sub {req:?}"))?; // TODO: 可恢复错误
+
+            let producer_id = stream.producer_id.clone();
+
+            let body = proto::SubscribeRequestSer {
+                room_id: "".into(), 
+                stream_id: &stream_id, 
+                producer_id: &producer_id, 
+                xid: &x_id, 
+                preferred_layers: None, // TODO: 从 SubCall 获取 preferred_layers
+            }.into_body();
+
+            let sn = session.xfer_mut().add_qos1_json(proto::PacketType::Request, &body, None)?;
+            delegate.response_handlers.insert(sn, Box::new(move |_delegate, response| {
+                let ret = records::SubReturn::try_new(x_id, producer_id, response)?;
+                cb.resolve(ret)?;
+                Ok(())
+            }));
+            Ok(())
+        })))?;
+
+        Ok(())
+
     }
 }
 
 
-pub struct TypesImpl;
+#[uniffi::export(with_foreign)]
+pub trait CbResolveConnX : Send + Sync {
+    fn resolve(&self, response: records::ConnXReturn) -> ForeignResult<()>;
+}
 
-impl Types for TypesImpl {
-    type Listener = ListenerBridge;
+#[uniffi::export(with_foreign)]
+pub trait CbResolvePub : Send + Sync {
+    fn resolve(&self, response: records::PubReturn) -> ForeignResult<()>;
+}
 
-    type ResponseHandler = Box<dyn ResponseHandler>;
+#[uniffi::export(with_foreign)]
+pub trait OnResolveUPub : Send + Sync {
+    fn resolve(&self, response: records::UPubReturn) -> ForeignResult<()>;
+}
+
+#[uniffi::export(with_foreign)]
+pub trait CbResolveMute : Send + Sync {
+    fn resolve(&self, response: records::MuteReturn) -> ForeignResult<()>;
+}
+
+#[uniffi::export(with_foreign)]
+pub trait CbResolveSub : Send + Sync {
+    fn resolve(&self, response: records::SubReturn) -> ForeignResult<()>;
+}
+
+
+impl SignalClient {
+    pub async fn into_finish(self) {
+        self.worker.into_finish().await
+    }
+
+    #[trace_result]
+    fn simple_request<REQ, RSP, F>(&self, req: REQ, func: F) -> GlueResult<()> 
+    where 
+        REQ: records::ToBody + Send + Sync + 'static,
+        RSP: TryFrom<proto::response::ResponseType, Error = anyhow::Error> + Send + Sync + 'static,
+        F: FnOnce(RSP) -> ForeignResult<()> + Send + Sync + 'static,
+    {
+
+        self.commit_op(Op::Request(Box::new(move |delegate, session| {
+
+            let body = req.to_body()?;
+
+            let sn = session.xfer_mut().add_qos1_json(proto::PacketType::Request, &body, None)?;
+
+            delegate.response_handlers.insert(sn, Box::new(move |_delegate, response| {
+                func(response.try_into()?)?;
+                Ok(())
+            }));
+
+            Ok(())
+
+        })))?;
+
+        Ok(())
+    }
+
+    #[trace_result]
+    fn commit_op(&self, op: Op<Arc<dyn Listener>>) -> GlueResult<()> {
+        {
+            self.shared.inbox.lock().push_back(op);
+        }
+        self.worker.commit()?;
+        Ok(())
+    }
 }
 
 
 
-// // #[macro_export]
-// macro_rules! define_export_client {
-//     (
-//         $( ($fn_name:ident, $req_ty:ty, $cb_trait:path) ),* $(,)?
-//     ) => {
-//         #[uniffi::export]
-//         impl Client {
-//             $(
-//                 #[trace_result]
-//                 pub fn $fn_name(
-//                     &self,
-//                     request: $req_ty,
-//                     cb: std::sync::Arc<dyn $cb_trait>
-//                 ) -> Result<()> {
-//                     let body = request.to_body().with_context(||"to_body failed")?;
-//                     self.core.request(body, cb.into_handler()).with_context(||"request faild")?;
-//                     Ok(())
-//                 }
-//             )*
-//         }
-//     };
+struct DelegateImpl<L> {
+    listener: L,
+    shared: Arc<Shared<L>>,
+    response_handlers: HashMap<i64, ResponseResolver<L>>,
+    users: HashMap<AStr, UserCell>,
+    dlink_x_id: Option<String>,
+}
+
+impl<L: Listener> DelegateImpl<L> {
+    #[trace_result]
+    async fn process_op(&mut self, session: &mut Session, msg: Op<L>) -> Result<()> {
+        match msg {
+            Op::Leave(status)=>{
+                session.set_close(status.into());
+            },
+            Op::Request(func) => {
+                func(self, session)?;
+            }
+        }
+        Ok(())
+    }
+
+    #[trace_result]
+    fn req_create_x(&mut self, xfer: &mut Xfer, dir: i32) -> Result<()> {
+
+        let body = proto::CreateWebrtcTransportRequestSer {
+            room_id: "".into(),
+            dir,
+            kind: 0,
+            dtls: Option::<()>::None,
+        }.into_body();
+
+        self.send_request(xfer, &body, Box::new(move |delegate, response| {
+            let rsp = records::OnCreateXResponse::try_from(response)?;
+
+            if dir == proto::Direction::Outbound.value() {
+                delegate.dlink_x_id = Some(rsp.xid.clone());
+            }
+            
+            delegate.listener.on_created_x(OnCreatedXArgs {
+                dir,
+                response: rsp,
+            })?;
+
+            Ok(())
+        }))?;
+
+        Ok(())
+    }
+
+    #[trace_result]
+    fn send_request<B>(&mut self, xfer: &mut Xfer, body: &B, resolver: ResponseResolver<L>) -> Result<()>
+    where 
+        B: serde::Serialize + fmt::Display,
+    {
+        let sn = xfer.add_qos1_json(proto::PacketType::Request, body, None)?;
+
+        self.response_handlers.insert(sn, resolver);
+
+        Ok(())
+    }
+
+    #[trace_result]
+    #[instrument(skip(self, _session, push))]
+    async fn handle_server_push(&mut self, _session: &mut Session, push: proto::ServerPush) -> Result<()> {
+        match push.typ {
+            proto::ServerPushType::Closed(notice) => {
+                return Err(notice.status.unwrap_or_default())
+            },
+            proto::ServerPushType::Chat(notice) => {
+                const CHAT_DIV: char = '.';
+                const USER_PREFIX: &'static str = formatcp!("u{CHAT_DIV}"); 
+                const ROOM_PREFIX: &'static str = formatcp!("r{CHAT_DIV}"); 
+
+                let Some(from_user_id) = notice.from.strip_prefix(USER_PREFIX) else {
+                    warn!("unknown chat.from [{}]", notice.from);
+                    return Ok(());
+                };
+
+                if let Some(room_id) = notice.to.strip_prefix(ROOM_PREFIX) {
+
+                    self.listener.on_room_chat(OnRoomChatArgs {
+                        chat: records::ChatArgs {
+                            from: from_user_id.into(), 
+                            to: room_id.into(), 
+                            body: notice.body,
+                        }
+                    })?;
+
+                } else if let Some(to_user_id) = notice.to.strip_prefix(USER_PREFIX) {
+                    self.listener.on_user_chat(OnUserChatArgs {
+                        chat: records::ChatArgs {
+                        from: from_user_id.into(), 
+                        to: to_user_id.into(),
+                        body: notice.body,
+                        }
+                    })?;
+
+                } else {
+                    warn!("unknown chat.to [{}]", notice.to);
+                    return Ok(());
+                }
+            },
+            proto::ServerPushType::UInit(id) => {
+                let user_id = id.id;
+                if let Some(cell) = self.users.remove(user_id.as_str()) {
+                    debug!("got user init but has user [{cell:?}]");
+                    self.listener.on_user_leaved(OnUserLeavedArgs {
+                        user_id,
+                    })?;
+                }
+            },
+            proto::ServerPushType::UReady(id) => {
+                let user_id: String = id.id;
+
+                let Some(user) = self.users.get_mut(user_id.as_str()) else {
+                    warn!("got user ready but NOT found user [{user_id}]");
+                    return Ok(())
+                };
+
+                match &user.stage {
+                    UserStage::Init => {},
+                    UserStage::Ready => {
+                        warn!("already ready but got user ready again, user_id [{user_id}]");
+                    },
+                }
+
+                user.stage = UserStage::Ready;
+                let tree = core::mem::replace(&mut user.tree, Vec::new());
+                let brief = user.brief();
+                self.listener.on_user_joined(OnUserJoinedArgs {
+                    user_id: user_id.clone(), 
+                    tree,
+                })?;
+
+                if let Some(muted) = brief.camera_muted {
+                    self.listener.on_add_stream(OnAddStreamArgs {
+                        user_id: user_id.clone(), 
+                        muted,
+                        stype: records::StreamType::Camera, 
+                    })?;
+                }
+                
+                if let Some(muted) = brief.mic_muted {
+                    self.listener.on_add_stream(OnAddStreamArgs {
+                        user_id: user_id.clone(), 
+                        muted,
+                        stype: records::StreamType::Mic, 
+                    })?;
+                }
+
+                if let Some(muted) = brief.screen_muted {
+                    self.listener.on_add_stream(OnAddStreamArgs {
+                        user_id: user_id.clone(), 
+                        muted,
+                        stype: records::StreamType::Screen, 
+                    })?;
+                }
+
+                // self.handle_extra_user(session, &user_id).await?;
+            },
+            proto::ServerPushType::UFull(new_state) => {
+                let r = self.users.remove_entry(new_state.id.as_str());
+
+                let (user_id, cell) = match r {
+                    Some((user_id, mut cell)) => {
+                        match &cell.stage {
+                            UserStage::Init => {
+                                if !new_state.online {
+                                    return Ok(())
+                                }
+                            },
+                            UserStage::Ready => {
+                                if !new_state.online {
+                                    // debug!("leaved user [{user_id}]");
+                                    self.listener.on_user_leaved(OnUserLeavedArgs {
+                                        user_id: user_id.to_string(),
+                                    })?;
+                                    return Ok(())
+                                }
+
+                                if new_state.inst_id != cell.state.inst_id {
+                                    // 不应该走到这里
+                                    warn!("got new user instance, old [{}], new [{}]", cell.state.inst_id, new_state.inst_id);
+                                    self.listener.on_user_leaved(OnUserLeavedArgs {
+                                        user_id: user_id.as_str().to_owned(),
+                                    })?;
+                                    cell.stage = UserStage::Init;
+                                } else {
+                                    cell.delta(&new_state, &mut self.listener)?;    
+                                }
+
+                            },
+                        }
+                        cell.state = new_state;
+                        (user_id, cell)
+                    },
+                    None => {
+                        let user_id: AStr = new_state.id.clone().into();
+                        (
+                            user_id.clone(),
+                            UserCell {
+                                user_id,
+                                state: new_state, 
+                                tree: Default::default(), 
+                                stage: UserStage::Init,
+                            }
+                        )
+                    },
+                };
+
+                self.users.insert(user_id, cell);
+            },
+            proto::ServerPushType::UTree(mut tree_state) => {
+                let user_id = tree_state.id.take().with_context(||"no user_id in user tree")?;
+                let user_id: AStr = user_id.into();
+
+                let Some(cell) = self.users.get_mut(&user_id) else {
+                    warn!("got user tree but has no user [{user_id}]");
+                    return Ok(())
+                };
+
+                match &cell.stage {
+                    UserStage::Init => {
+                        cell.tree.push(tree_state.into());
+                    },
+                    UserStage::Ready => {
+                        self.listener.on_update_user_tree(OnUpdateUserTreeArgs {
+                            user_id: user_id.to_string(), 
+                            node: tree_state.into(),
+                        })?;
+                    },
+                }
+            },
+            proto::ServerPushType::RTree(tree_state) => {
+                self.listener.on_update_room_tree(OnUpdateRoomTreeArgs {
+                    node: tree_state.into(),
+                })?;
+            },
+            proto::ServerPushType::RReady(_id) => {
+                self.listener.on_room_ready()?;
+            },
+        }
+        Ok(())
+    }
+}
+
+#[allow(unused)]
+impl<L: Listener> Delegate for DelegateImpl<L> {
+
+    #[instrument(skip_all)]
+    #[trace_result]
+    async fn on_opening(&mut self, xfer: &mut Xfer) -> Result<()> {
+        self.req_create_x(xfer, proto::Direction::Inbound.value())?;
+        self.req_create_x(xfer, proto::Direction::Outbound.value())?;
+        Ok(())
+    }
+
+    #[instrument(skip_all)]
+    #[trace_result]
+    async fn on_opened(&mut self, session: &mut Session) -> Result<()> {
+        self.listener.on_opened(OnOpenedArgs {
+            session_id: session.session_id().into(),
+        })?;
+        Ok(())
+    }
+
+    #[instrument(skip_all)]
+    async fn on_closed(&mut self, status: proto::Status) -> Result<()> {
+        self.listener.on_closed(OnClosedArgs {
+            status: status.into(),
+        })?;
+        Ok(())
+    }
+
+    #[instrument(skip_all)]
+    #[trace_result]
+    async fn on_process(&mut self, session: &mut Session) -> Result<()> {
+        while let Some(msg) = self.shared.pop_inbox() {
+            self.process_op(session, msg).await?;
+        }
+
+        Ok(())
+    }
+
+    #[instrument(skip_all)]
+    #[trace_result]
+    async fn on_response(&mut self, session: &mut Session, ack: i64, mut response: proto::ServerResponse) -> Result<()> {
+        let resolver = self.response_handlers.remove(&ack)
+            .with_context(||format!("Not found response handler for ack [{ack}]"))?;
+
+        let status = response.status.take().unwrap_or_default();
+        if status.code != 0 {
+            warn!("response failed, ack [{ack}], {status:?}");
+            return Ok(())
+        }
+
+        resolver(self, response.typ.with_context(||"no typ field in response")?)?;
+
+        Ok(())
+    }
+
+    #[instrument(skip_all)]
+    #[trace_result]
+    async fn on_push(&mut self, session: &mut Session, push: proto::ServerPush) -> Result<()>  {
+        self.handle_server_push(session, push).await
+    }
+
+}
+
+
+struct Shared<L> {
+    inbox: Mutex<VecDeque<Op<L>>>,
+}
+
+impl<L> Default for Shared<L> {
+    fn default() -> Self {
+        Self { inbox: Default::default() }
+    }
+}
+
+impl<L> Shared<L> {
+    fn pop_inbox(&self) -> Option<Op<L>> {
+        self.inbox.lock().pop_front()
+    }
+}
+
+
+enum Op<L> {
+    Leave(records::Status),
+    Request(RequestBuilder<L>),
+}
+
+type RequestBuilder<L> = Box<dyn FnOnce(&mut DelegateImpl<L>, &mut Session) -> Result<()> + Send + Sync>;
+type ResponseResolver<L> = Box<dyn FnOnce(&mut DelegateImpl<L>, proto::response::ResponseType) -> Result<()> + Send + Sync>;
+
+
+#[derive(Debug)]
+struct UserCell {
+    user_id: AStr, 
+    state: proto::UserState,
+    tree: Vec<records::TreeNode>,
+    stage: UserStage,
+}
+
+impl UserCell {
+    #[trace_result]
+    pub fn delta<L>(&self, new_state: &proto::UserState, listener: &mut L) -> Result<()>
+    where 
+        L: Listener,
+    {
+        let old_state = &self.state;
+
+        for (stream_id, old_stream) in old_state.streams.iter() {
+            match new_state.streams.get(stream_id) {
+                Some(new_stream) => {
+                    if old_stream.producer_id != new_stream.producer_id {
+                        listener.on_remove_stream(OnRemoveStreamArgs {
+                            user_id: self.user_id.to_string(), 
+                            stype: records::StreamType::from_value(old_stream.stype)?,
+                        })?;
+                        listener.on_add_stream(OnAddStreamArgs {
+                            user_id: self.user_id.to_string(), 
+                            muted: new_stream.muted,
+                            stype: records::StreamType::from_value(new_stream.stype)?, 
+                        })?;
+                    } else {
+                        if old_stream.muted != new_stream.muted {
+                            listener.on_update_stream(OnUpdateStreamArgs {
+                                user_id: self.user_id.to_string(), 
+                                muted: new_stream.muted,
+                                stype: records::StreamType::from_value(old_stream.stype)?,
+                            })?;
+                        }
+                    }
+                },
+                None => {
+                    listener.on_remove_stream(OnRemoveStreamArgs {
+                        user_id: self.user_id.to_string(), 
+                        stype: records::StreamType::from_value(old_stream.stype)?,
+                    })?;
+                },
+            }
+        }
+
+        for (stream_id, new_stream) in new_state.streams.iter() {
+
+            match old_state.streams.get(stream_id) {
+                Some(_old_stream) => {},
+                None => {
+                    listener.on_add_stream(OnAddStreamArgs {
+                        user_id: self.user_id.to_string(), 
+                        muted: new_stream.muted,
+                        stype: records::StreamType::from_value(new_stream.stype)?, 
+                    })?;
+                },
+            }
+        }
+
+        Ok(())
+    }
+
+    pub fn brief(&self) -> UserBrief {
+        UserBrief {
+            camera_muted: self.stream_muted(proto::StreamType::Camera),
+            mic_muted: self.stream_muted(proto::StreamType::Mic),
+            screen_muted: self.stream_muted(proto::StreamType::Screen),
+        }
+    }
+
+    fn stream_muted(&self, stype: proto::StreamType) -> Option<bool> {
+        self.state.streams
+            .iter()
+            .find(|x|x.1.stype == stype.value())
+            .map(|x|x.1.muted)
+                
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum UserStage {
+    Init,
+    Ready,
+}
+
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+struct UserBrief {
+    camera_muted: Option<bool>,
+    mic_muted: Option<bool>,
+    screen_muted: Option<bool>,
+}
+
+
+#[derive(uniffi::Record)]
+#[derive(Debug)]
+pub struct OnOpenedArgs {
+    pub session_id: String,
+}
+
+#[derive(uniffi::Record)]
+#[derive(Debug)]
+pub struct OnClosedArgs {
+    pub status: records::Status,
+}
+
+
+
+
+#[derive(uniffi::Record)]
+#[derive(Debug)]
+pub struct OnCreatedXArgs {
+    pub dir: i32,
+    pub response: records::OnCreateXResponse,
+}
+
+#[derive(uniffi::Record)]
+#[derive(Debug)]
+pub struct OnRoomChatArgs {
+    pub chat: records::ChatArgs,
+}
+
+#[derive(uniffi::Record)]
+#[derive(Debug)]
+pub struct OnUserChatArgs {
+    pub chat: records::ChatArgs,
+}
+
+
+#[derive(uniffi::Record)]
+#[derive(Debug)]
+pub struct OnUserJoinedArgs {
+    pub user_id: String, 
+    pub tree: Vec<records::TreeNode>,
+}
+
+#[derive(uniffi::Record)]
+#[derive(Debug)]
+pub struct OnUserLeavedArgs {
+    pub user_id: String,
+}
+
+#[derive(uniffi::Record)]
+#[derive(Debug)]
+pub struct OnAddStreamArgs {
+    pub user_id: String,
+    pub stype: records::StreamType, 
+    pub muted: bool,
+}
+
+#[derive(uniffi::Record)]
+#[derive(Debug)]
+pub struct OnUpdateStreamArgs {
+    pub user_id: String,
+    pub stype: records::StreamType, 
+    pub muted: bool,
+}
+
+#[derive(uniffi::Record)]
+#[derive(Debug)]
+pub struct OnRemoveStreamArgs {
+    pub user_id: String,
+    pub stype: records::StreamType, 
+}
+
+#[derive(uniffi::Record)]
+#[derive(Debug)]
+pub struct OnUpdateUserTreeArgs {
+    pub user_id: String,
+    pub node: records::TreeNode, 
+}
+
+#[derive(uniffi::Record)]
+#[derive(Debug)]
+pub struct OnUpdateRoomTreeArgs {
+    pub node: records::TreeNode, 
+}
+
+
+
+#[allow(unused)]
+#[uniffi::export(with_foreign)]
+#[auto_impl::auto_impl(&, Box, Arc)]
+pub trait Listener: Send + Sync + 'static {
+    fn on_opened(&self, args: OnOpenedArgs) -> ForeignResult<()>;
+    fn on_closed(&self, args: OnClosedArgs) -> ForeignResult<()>;
+    
+    fn on_created_x(&self, args: OnCreatedXArgs) -> ForeignResult<()>;
+    fn on_room_chat(&self, args: OnRoomChatArgs) -> ForeignResult<()>;
+    fn on_user_chat(&self, args: OnUserChatArgs) -> ForeignResult<()>;
+    // fn on_user_ready(&self) -> ForeignResult<()> ;
+    fn on_room_ready(&self) -> ForeignResult<()> ;
+
+    // fn on_user_joined(&self, user_id: &str, camera_muted: Option<bool>, mic_muted: Option<bool>, screen_muted: Option<bool>, tree: Vec<proto::TreeState>) -> ForeignResult<()> {
+    //     Ok(())
+    // }
+
+    fn on_user_joined(&self, args: OnUserJoinedArgs) -> ForeignResult<()>;
+
+    fn on_user_leaved(&self, args: OnUserLeavedArgs) -> ForeignResult<()> ;
+
+    fn on_add_stream(&self, args: OnAddStreamArgs) -> ForeignResult<()> ;
+
+    fn on_update_stream(&self, args: OnUpdateStreamArgs) -> ForeignResult<()> ;
+
+    fn on_remove_stream(&self, args: OnRemoveStreamArgs) -> ForeignResult<()> ;
+
+    fn on_update_user_tree(&self, args: OnUpdateUserTreeArgs) -> ForeignResult<()>;
+
+    fn on_update_room_tree(&self, args: OnUpdateRoomTreeArgs) -> ForeignResult<()>;
+
+
+
+    // fn on_extra_sub(&self, user_id: String, xid: String, stream_id: String, stype: i32, producer_id: String, consumer_id: String, rtp: Option<String>) -> ForeignResult<()> {
+    //     Ok(())
+    // }
+
+}
+
+// #[allow(unused)]
+// pub trait ListenerMut: Send + Sync + 'static {
+//     fn on_opened(&mut self, session_id: &str) -> Result<()>;
+//     fn on_closed(&mut self, status: proto::Status) -> Result<()>;
+//     fn on_room_chat(&mut self, from: &str, to: &str, body: &str) -> Result<()>;
+//     fn on_user_chat(&mut self, from: &str, to: &str, body: &str) -> Result<()>;
+//     fn on_user_ready(&mut self) -> Result<()> {
+//         Ok(())
+//     }
+//     fn on_room_ready(&mut self) -> Result<()> {
+//         Ok(())
+//     }
+
+//     // fn on_user_joined(&mut self, user_id: &str, camera_muted: Option<bool>, mic_muted: Option<bool>, screen_muted: Option<bool>, tree: Vec<proto::TreeState>) -> Result<()> {
+//     //     Ok(())
+//     // }
+
+//     fn on_user_joined(&mut self, user_id: AStr, tree: Vec<proto::TreeState>) -> Result<()> {
+//         Ok(())
+//     }
+
+//     fn on_user_leaved(&mut self, user_id: AStr) -> Result<()> {
+//         Ok(())
+//     }
+
+//     fn on_add_stream(&mut self, user_id: AStr, stype: i32, muted: bool) -> Result<()> {
+//         Ok(())
+//     }
+
+//     fn on_update_stream(&mut self, user_id: AStr, stype: i32, muted: bool) -> Result<()> {
+//         Ok(())
+//     }
+
+//     fn on_remove_stream(&mut self, user_id: AStr, stype: i32) -> Result<()> {
+//         Ok(())
+//     }
+
+//     fn on_update_user_tree(&mut self, user_id: AStr, op: proto::TreeState) -> Result<()> {
+//         Ok(())
+//     }
+
+//     fn on_update_room_tree(&mut self, op: proto::TreeState) -> Result<()> {
+//         Ok(())
+//     }
+
+
+
+//     fn on_extra_sub(&mut self, user_id: String, xid: String, stream_id: String, stype: i32, producer_id: String, consumer_id: String, rtp: Option<String>) -> Result<()> {
+//         Ok(())
+//     }
+
 // }
-
-// define_export_client!(
-//     (create_x, CreateXRequest, OnCreateXResult),
-//     (conn_x, ConnXRequest, OnConnXResult),
-// );
-
-macro_rules! define_client_result_functions {
-    ( $( ($fn_name:ident, $base:ident) ),* $(,)? ) => {
-        paste::paste! {
-            #[uniffi::export]
-            impl Client {
-                $(
-                    #[trace_result]
-                    pub fn [<$fn_name _result>](
-                        &self,
-                        request: [<$base Request>],
-                        cb: std::sync::Arc<dyn [<On $base Result>]>
-                    ) -> Result<()> {
-                        let body = request.to_body().with_context(||"to_body failed")?;
-                        self.core.request(body, cb.into_handler()).with_context(||"request failed")?;
-                        Ok(())
-                    }
-                )*
-            }
-        }
-    };
-}
-
-macro_rules! define_client_resolve_functions {
-    ( $( ($fn_name:ident, $base:ident) ),* $(,)? ) => {
-        paste::paste! {
-            #[uniffi::export]
-            impl Client {
-                $(
-                    #[trace_result]
-                    pub fn $fn_name(
-                        &self,
-                        request: [<$base Request>],
-                        cb: std::sync::Arc<dyn [<On $base Resolve>]>
-                    ) -> Result<()> {
-                        let body = request.to_body().with_context(||"to_body failed")?;
-                        self.core.request(body, cb.into_handler(self.on_event.clone())).with_context(||"request failed")?;
-                        Ok(())
-                    }
-                )*
-            }
-        }
-    };
-}
-
-
-macro_rules! define_result_handler {
-    ($base:ident) => {
-        paste::paste! {
-            #[uniffi::export(with_foreign)]
-            pub trait [<On $base Result>]: Send + Sync {
-                fn resolve(&self, response: [<$base Response>]) -> ForeignResult<()>;
-                fn reject(&self, code: i32, reason: String) -> ForeignResult<()>;
-            }
-
-            impl [<On $base Result>] for () {
-                fn resolve(&self, response: [<$base Response>]) -> ForeignResult<()> {
-                    log::debug!("success response of [{}], {response:?}", stringify!($base));
-                    Ok(())
-                }
-
-                fn reject(&self, code: i32, reason: String) -> ForeignResult<()> {
-                    log::debug!("fail response of [{}], [{code}]-[{reason}]", stringify!($base));
-                    Ok(())
-                }
-            }
-
-            pub struct [<$base ResponseHandler>] {
-                cb: std::sync::Arc<dyn [<On $base Result>]>,
-            }
-
-            impl ResponseHandler for [<$base ResponseHandler>] {
-                fn on_success(&mut self, response: proto::response::ResponseType) -> anyhow::Result<()> {
-                    match response {
-                        proto::response::ResponseType::[<$base>](rsp) => {
-                            self.cb.resolve(rsp.try_into()?)?;
-                            Ok(())
-                        }
-                        _ => return Err(anyhow::anyhow!("Unexpect response of [{}], {response:?}", stringify!($base))),
-                    }
-                }
-
-                fn on_fail(&mut self, code: i32, reason: String) -> anyhow::Result<()> {
-                    self.cb.reject(code, reason)?;
-                    Ok(())
-                }
-            }
-
-            impl IntoHandler for std::sync::Arc<dyn [<On $base Result>]> {
-                fn into_handler(self) -> Box<dyn ResponseHandler> {
-                    Box::new([<$base ResponseHandler>] {
-                        cb: self
-                    })
-                }
-            }
-        }
-    };
-}
-
-
-macro_rules! define_resolve_handler {
-    ($base:ident) => {
-        paste::paste! {
-
-            #[uniffi::export(with_foreign)]
-            pub trait [<On $base Resolve>]: Send + Sync {
-                fn resolve(&self, response: [<$base Response>]) -> ForeignResult<()>;
-            }
-
-            impl [<On $base Resolve>] for () {
-                fn resolve(&self, response: [<$base Response>]) -> ForeignResult<()> {
-                    log::debug!("success response of [{}], {response:?}", stringify!($base));
-                    Ok(())
-                }
-            }
-
-            pub struct [<$base ResolveHandler>] {
-                cb: std::sync::Arc<dyn [<On $base Resolve>]>,
-                on_event: Arc<dyn OnEvent>,
-            }
-
-            impl ResponseHandler for [<$base ResolveHandler>] {
-                fn on_success(&mut self, response: proto::response::ResponseType) -> anyhow::Result<()> {
-                    match response {
-                        proto::response::ResponseType::[<$base>](rsp) => {
-                            self.cb.resolve(rsp.try_into()?)?;
-                            Ok(())
-                        }
-                        _ => return Err(anyhow::anyhow!("Unexpect response of [{}], {response:?}", stringify!($base))),
-                    }
-                }
-
-                fn on_fail(&mut self, code: i32, reason: String) -> anyhow::Result<()> {
-                    self.on_event.on_request_failed(stringify!($base).into(), code, reason)?;
-                    Ok(())
-                }
-            }
-
-            impl IntoResolveHandler for std::sync::Arc<dyn [<On $base Resolve>]> {
-                fn into_handler(self, on_event: Arc<dyn OnEvent>) -> Box<dyn ResponseHandler> {
-                    Box::new([<$base ResolveHandler>] {
-                        cb: self,
-                        on_event,
-                    })
-                }
-            }
-        }
-    };
-}
-
-macro_rules! define_response_handler {
-    ($base:ident) => {
-        define_result_handler!($base);
-        define_resolve_handler!($base);
-    };
-}
-
-define_response_handler!(CreateX);
-
-define_response_handler!(ConnX);
-
-define_response_handler!(Pub);
-
-define_response_handler!(UPub);
-
-define_response_handler!(Mute);
-
-
-define_client_result_functions!(
-    (create_x, CreateX),
-    (conn_x, ConnX),
-    (pub_stream, Pub),
-    (upub_stream, UPub),
-    (mute_stream, Mute),
-);
-
-define_client_resolve_functions!(
-    (create_x, CreateX),
-    (conn_x, ConnX),
-    (pub_stream, Pub),
-    (upub_stream, UPub),
-    (mute_stream, Mute),
-);
-
-
-
-pub trait IntoResolveHandler {
-    fn into_handler(self, on_event: Arc<dyn OnEvent>) -> Box<dyn ResponseHandler>;
-}
 
 
