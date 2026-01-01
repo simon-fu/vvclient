@@ -56,6 +56,7 @@ impl Worker {
 
         let task = Task {
             connector: TungConnector::new(config.advance.connection.ignore_server_cert),
+            flag: Flag::default(),
             config,
             url,
             rx,
@@ -107,6 +108,7 @@ struct Task<T: Delegate> {
     config: JoinConfig,
     connector: TungConnector,
     rx: mpsc::Receiver<()>,
+    flag: Flag,
     listener: T,
 }
 
@@ -123,10 +125,16 @@ impl<T: Delegate> Task<T> {
                 proto::Status::default()
             },
             Err(e) => {
-                let err = trace_error!("finished error", e);
-                error!("{}", fmt_error!(err));
-
-                let status: proto::Status = err.into();
+                
+                let status: proto::Status = if !self.flag.got_closed {
+                    let err = trace_error!("finished error", e);
+                    error!("{}", fmt_error!(err));
+                    err.into()
+                } else {
+                    debug!("got closed");
+                    Default::default()
+                };
+                
                 status
             },
         };
@@ -553,7 +561,7 @@ impl<T: Delegate> Task<T> {
         loop {
             let r = tokio::select! {
                 r = self.rx.recv() => {
-                    check_guard(r)?;
+                    self.flag.check_guard(r)?;
                     continue;
                 }
 
@@ -607,6 +615,8 @@ impl<T: Delegate> Task<T> {
                     x.iter().map(|y|proto::UpdateTreeRequestSer::from(y))
                     .into_iter_ser()
                 ),
+            batch: self.config.advance.batch, // Some(true),
+            // create_x_requests: Option::<()>::None,
         };
 
         let packet = proto::PacketSer {
@@ -647,7 +657,7 @@ impl<T: Delegate> Task<T> {
         loop {
             tokio::select! {
                 r = self.rx.recv() => {
-                    check_guard(r)?;
+                    self.flag.check_guard(r)?;
                     return Ok(None)
                 }
 
@@ -678,7 +688,7 @@ impl<T: Delegate> Task<T> {
         loop {
             tokio::select! {
                 r = self.rx.recv() => {
-                    check_guard(r)?;
+                    self.flag.check_guard(r)?;
                 }
 
                 _r = async_rt::sleep_until(deadline) => {
@@ -690,9 +700,22 @@ impl<T: Delegate> Task<T> {
 }
 
 
-fn check_guard(r: Option<()>) -> Result<()> {
-    r.with_context(||"got closed")
+#[derive(Debug, Clone, Default)]
+struct Flag {
+    got_closed: bool,
 }
+
+impl Flag {
+    fn check_guard(&mut self, r: Option<()>) -> Result<()> {
+        let r = r.with_context(||"got closed");
+        if r.is_err() {
+            self.got_closed = true;
+        }
+        r
+    }
+}
+
+
 
 #[trace_result]
 fn parse_open_response_packet(packet: &proto::PacketRef) -> Result<proto::OpenSessionResponse> {

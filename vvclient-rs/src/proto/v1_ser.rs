@@ -80,7 +80,12 @@ pub struct OpenSessionRequestSer<'a, UTREE>
 
     #[serde(skip_serializing_if = "Option::is_none")]
     pub user_tree: Option< UTREE >,
-    // pub user_tree: Option<Vec<UpdateTreeRequestRef<'a>>>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub batch: Option<bool>,
+
+    // #[serde(skip_serializing_if = "Option::is_none")]
+    // pub create_x_requests: Option<XREQS>,  
 }
 
 impl<'a, UTREE> OpenSessionRequestSer<'a, UTREE> {
@@ -355,6 +360,30 @@ pub enum SubTypeSer<T> {
     Sub(T),
 }
 
+#[derive(serde::Serialize, Clone, PartialEq, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct BatchEndRequestSer {
+
+}
+
+impl BatchEndRequestSer {
+    pub fn into_msg(self) -> ClientRequestSer<BatchEndTypeSer<Self>> {
+        ClientRequestSer {
+            typ: BatchEndTypeSer::BEnd(self)
+        }
+    }
+
+    pub fn into_body(self) -> JsonDisplay<ClientRequestSer<BatchEndTypeSer<Self>>> {
+        JsonDisplay(self.into_msg())
+    }
+}
+
+#[derive(serde::Serialize, Clone, PartialEq, Debug)]
+pub enum BatchEndTypeSer<T> {
+    BEnd(T),
+}
+
+
 
 pub trait IntoIterSerialize {
     fn into_iter_ser(self) -> impl serde::Serialize;
@@ -434,6 +463,8 @@ mod tests {
                     x.iter().map(|y|UpdateTreeRequestSer::from(y))
                     .into_iter_ser()
                 ),
+            batch: None,
+            // create_x_requests: Option::<()>::None,
         };
 
         let packet = PacketSer {

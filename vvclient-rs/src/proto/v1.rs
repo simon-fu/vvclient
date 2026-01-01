@@ -387,6 +387,8 @@ pub mod client_message {
 
         Chat(super::ChatRequest),
 
+        BEnd(super::BatchEndRequest),
+
         // Ack(super::PushAck),
     }
 }
@@ -402,6 +404,12 @@ pub struct OpenSessionRequest {
 
     #[serde(skip_serializing_if = "Option::is_none")]
     pub user_tree: Option<Vec<UpdateTreeRequest>>,    
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub batch: Option<bool>, 
+    
+    // #[serde(skip_serializing_if = "Option::is_none")]
+    // pub create_x_requests: Option<Vec<CreateWebrtcTransportRequest>>,   
 }
 
 #[derive(serde::Serialize, serde::Deserialize, Clone, PartialEq, Debug)]
@@ -495,10 +503,26 @@ pub struct ChatRequest {
 }
 
 #[derive(serde::Serialize, serde::Deserialize, Clone, PartialEq, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct BatchEndRequest {
+    
+}
+
+#[derive(serde::Serialize, serde::Deserialize, Clone, PartialEq, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct BatchEndResponse {
+    
+}
+
+
+#[derive(serde::Serialize, serde::Deserialize, Clone, PartialEq, Debug)]
 pub struct OpenSessionResponse {
     pub session_id: String,
     /// 连接 Id
     pub conn_id: ::prost::alloc::string::String,
+
+    // #[serde(skip_serializing_if = "Option::is_none")]
+    // pub create_x_responses: Option<Vec<CreateWebrtcTransportResponse>>, 
 }
 
 #[derive(serde::Serialize, serde::Deserialize, Clone, PartialEq, Debug)]
@@ -656,6 +680,8 @@ pub mod response {
         UpRTree(super::UpdateTreeResponse),
 
         Chat(super::ChatResponse),
+
+        BEnd(super::BatchEndResponse),
     }
 }
 
@@ -869,7 +895,7 @@ pub struct CreateWebrtcTransportResponse {
 /// 传输通道方向
 #[derive(serde::Deserialize, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, FromRepr)]
 #[repr(i32)]
 pub enum Direction {
     /// 发送通道

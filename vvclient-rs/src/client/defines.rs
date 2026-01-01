@@ -22,6 +22,8 @@ pub struct JoinAdvanceArgs {
     pub user_tree: Option<Vec<proto::UpdateTreeRequest>>, 
 
     pub connection: ConnectionConfig,
+
+    pub batch: Option<bool>,
 }
 
 #[derive(Debug, Clone, Default)]

@@ -184,6 +184,14 @@ impl TryFrom<proto::response::ResponseType> for OnCreateXResponse {
             },
         };
 
+        Self::try_from(value)
+    }
+}
+
+impl TryFrom<proto::CreateWebrtcTransportResponse> for OnCreateXResponse {
+    type Error = Error;
+
+    fn try_from(value: proto::CreateWebrtcTransportResponse) -> std::result::Result<Self, Self::Error> {
         let ice_param = match &value.ice_param {
             Some(v) => {
                 let j = serde_json::to_string(v)?;
@@ -211,7 +219,6 @@ impl TryFrom<proto::response::ResponseType> for OnCreateXResponse {
         })
     }
 }
-
 
 #[derive(uniffi::Record)]
 #[derive(Debug)]
@@ -472,12 +479,14 @@ pub struct SubReturn {
 
     pub producer_id: String,
 
+    pub stream_id: String,
+
     /// Rtp Parameters
     pub rtp: Option<String>, // Option<mediasoup::prelude::RtpParameters>,
 }
 
 impl SubReturn {
-    pub fn try_new(x_id: String, producer_id: String, response: proto::response::ResponseType) -> Result<Self> {
+    pub fn try_new(x_id: String, producer_id: String, stream_id: String, response: proto::response::ResponseType) -> Result<Self> {
         match response {
             proto::response::ResponseType::Sub(rsp) => {
                 Result::<_>::Ok(Self {
@@ -485,6 +494,7 @@ impl SubReturn {
                     rtp: rsp.rtp.map(|x|serde_json::to_string(&x)).transpose()?,
                     x_id, 
                     producer_id,
+                    stream_id,
                 })
             }
             _ => {

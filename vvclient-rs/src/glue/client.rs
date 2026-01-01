@@ -15,7 +15,7 @@ use core::fmt;
 
 use std::{collections::{HashMap, VecDeque}, sync::Arc};
 
-use crate::{client::xfer::Xfer, kit::astr::AStr, proto};
+use crate::{client::{defines::JoinConfig, xfer::Xfer}, kit::astr::AStr, proto};
 
 use crate::client::worker::{Delegate, Session, Worker};
 
@@ -39,11 +39,15 @@ pub fn make_signal_client(url: String, config: records::SignalConfig, listener: 
         users: Default::default(),
         response_handlers: Default::default(),
         dlink_x_id: Default::default(),
+        // got_room_ready: false,
     };
 
     let shared = delegate.shared.clone();
 
-    let worker = Worker::try_new(url, None, config.into(), delegate)?;
+    let mut config: JoinConfig = config.into();
+    config.advance.batch = Some(true);
+
+    let worker = Worker::try_new(url, None, config, delegate)?;
 
     Ok(SignalClient {
         worker,
@@ -110,6 +114,7 @@ impl SignalClient {
                 .with_context(||format!("can't find stream for sub {req:?}"))?; // TODO: 可恢复错误
 
             let producer_id = stream.producer_id.clone();
+            let stream_id = stream_id.clone();
 
             let body = proto::SubscribeRequestSer {
                 room_id: "".into(), 
@@ -121,7 +126,7 @@ impl SignalClient {
 
             let sn = session.xfer_mut().add_qos1_json(proto::PacketType::Request, &body, None)?;
             delegate.response_handlers.insert(sn, Box::new(move |_delegate, response| {
-                let ret = records::SubReturn::try_new(x_id, producer_id, response)?;
+                let ret = records::SubReturn::try_new(x_id, producer_id, stream_id, response)?;
                 cb.resolve(ret)?;
                 Ok(())
             }));
@@ -209,9 +214,25 @@ struct DelegateImpl<L> {
     response_handlers: HashMap<i64, ResponseResolver<L>>,
     users: HashMap<AStr, UserCell>,
     dlink_x_id: Option<String>,
+    // got_room_ready: bool,
 }
 
 impl<L: Listener> DelegateImpl<L> {
+    // fn is_ready(&self) -> bool {
+    //     self.got_room_ready && self.dlink_x_id.is_some()
+    // }
+
+    // #[trace_result]
+    // fn check_fire_room_ready(&self) -> Result<()> {
+    //     if !self.is_ready() {
+    //         return Ok(())
+    //     }
+
+    //     self.listener.on_room_ready()?;
+
+    //     Ok(())
+    // }
+
     #[trace_result]
     async fn process_op(&mut self, session: &mut Session, msg: Op<L>) -> Result<()> {
         match msg {
@@ -240,12 +261,28 @@ impl<L: Listener> DelegateImpl<L> {
 
             if dir == proto::Direction::Outbound.value() {
                 delegate.dlink_x_id = Some(rsp.xid.clone());
+                // delegate.check_fire_room_ready()?;
             }
             
             delegate.listener.on_created_x(OnCreatedXArgs {
                 dir,
                 response: rsp,
             })?;
+
+            Ok(())
+        }))?;
+
+        Ok(())
+    }
+
+    #[trace_result]
+    fn req_batch_end(&mut self, xfer: &mut Xfer) -> Result<()> {
+
+        let body = proto::BatchEndRequestSer {
+            
+        }.into_body();
+
+        self.send_request(xfer, &body, Box::new(move |_delegate, _response| {
 
             Ok(())
         }))?;
@@ -316,6 +353,8 @@ impl<L: Listener> DelegateImpl<L> {
                 }
             },
             proto::ServerPushType::UReady(id) => {
+                // let is_ready = self.is_ready();
+
                 let user_id: String = id.id;
 
                 let Some(user) = self.users.get_mut(user_id.as_str()) else {
@@ -331,36 +370,8 @@ impl<L: Listener> DelegateImpl<L> {
                 }
 
                 user.stage = UserStage::Ready;
-                let tree = core::mem::replace(&mut user.tree, Vec::new());
-                let brief = user.brief();
-                self.listener.on_user_joined(OnUserJoinedArgs {
-                    user_id: user_id.clone(), 
-                    tree,
-                })?;
 
-                if let Some(muted) = brief.camera_muted {
-                    self.listener.on_add_stream(OnAddStreamArgs {
-                        user_id: user_id.clone(), 
-                        muted,
-                        stype: records::StreamType::Camera, 
-                    })?;
-                }
-                
-                if let Some(muted) = brief.mic_muted {
-                    self.listener.on_add_stream(OnAddStreamArgs {
-                        user_id: user_id.clone(), 
-                        muted,
-                        stype: records::StreamType::Mic, 
-                    })?;
-                }
-
-                if let Some(muted) = brief.screen_muted {
-                    self.listener.on_add_stream(OnAddStreamArgs {
-                        user_id: user_id.clone(), 
-                        muted,
-                        stype: records::StreamType::Screen, 
-                    })?;
-                }
+                fire_user_joined(&self.listener, &user_id, user)?;
 
                 // self.handle_extra_user(session, &user_id).await?;
             },
@@ -444,10 +455,48 @@ impl<L: Listener> DelegateImpl<L> {
             },
             proto::ServerPushType::RReady(_id) => {
                 self.listener.on_room_ready()?;
+                // self.got_room_ready = true;
+                // self.check_fire_room_ready()?;
             },
         }
         Ok(())
     }
+}
+
+fn fire_user_joined<L: Listener>(listener: &L, user_id: &String, user: &mut UserCell) -> Result<()> {
+
+    let tree = core::mem::replace(&mut user.tree, Vec::new());
+
+    let brief = user.brief();
+    listener.on_user_joined(OnUserJoinedArgs {
+        user_id: user_id.clone(), 
+        tree,
+    })?;
+
+    if let Some(muted) = brief.camera_muted {
+        listener.on_add_stream(OnAddStreamArgs {
+            user_id: user_id.clone(), 
+            muted,
+            stype: records::StreamType::Camera, 
+        })?;
+    }
+    
+    if let Some(muted) = brief.mic_muted {
+        listener.on_add_stream(OnAddStreamArgs {
+            user_id: user_id.clone(), 
+            muted,
+            stype: records::StreamType::Mic, 
+        })?;
+    }
+
+    if let Some(muted) = brief.screen_muted {
+        listener.on_add_stream(OnAddStreamArgs {
+            user_id: user_id.clone(), 
+            muted,
+            stype: records::StreamType::Screen, 
+        })?;
+    }
+    Ok(())
 }
 
 #[allow(unused)]
@@ -458,6 +507,7 @@ impl<L: Listener> Delegate for DelegateImpl<L> {
     async fn on_opening(&mut self, xfer: &mut Xfer) -> Result<()> {
         self.req_create_x(xfer, proto::Direction::Inbound.value())?;
         self.req_create_x(xfer, proto::Direction::Outbound.value())?;
+        self.req_batch_end(xfer)?;
         Ok(())
     }
 
@@ -466,6 +516,11 @@ impl<L: Listener> Delegate for DelegateImpl<L> {
     async fn on_opened(&mut self, session: &mut Session) -> Result<()> {
         self.listener.on_opened(OnOpenedArgs {
             session_id: session.session_id().into(),
+            // create_x_responses: create_x_responses.map(|x|{
+            //     x.into_iter()
+            //     .map(|x|records::OnCreateXResponse::try_from(x))
+            //     .collect()
+            // }).transpose()?,
         })?;
         Ok(())
     }
@@ -641,6 +696,7 @@ struct UserBrief {
 #[derive(Debug)]
 pub struct OnOpenedArgs {
     pub session_id: String,
+    // pub create_x_responses: Option<Vec<records::OnCreateXResponse>>,
 }
 
 #[derive(uniffi::Record)]
@@ -721,6 +777,36 @@ pub struct OnUpdateRoomTreeArgs {
     pub node: records::TreeNode, 
 }
 
+
+
+pub struct ResolveFn<F>(pub F);
+
+impl<F> CbResolveConnX for ResolveFn<F> 
+where 
+    F: Fn(records::ConnXReturn) -> ForeignResult<()> + Send + Sync,
+{
+    fn resolve(&self, response:records::ConnXReturn) -> ForeignResult<()>  {
+        self.0(response)
+    }
+}
+
+impl<F> CbResolvePub for ResolveFn<F> 
+where 
+    F: Fn(records::PubReturn) -> ForeignResult<()> + Send + Sync,
+{
+    fn resolve(&self, response:records::PubReturn) -> ForeignResult<()>  {
+        self.0(response)
+    }
+}
+
+impl<F> CbResolveSub for ResolveFn<F> 
+where 
+    F: Fn(records::SubReturn) -> ForeignResult<()> + Send + Sync,
+{
+    fn resolve(&self, response: records::SubReturn) -> ForeignResult<()>  {
+        self.0(response)
+    }
+}
 
 
 #[allow(unused)]

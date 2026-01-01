@@ -205,8 +205,8 @@ pub enum ParseMimeTypeError {
     #[error("Invalid MIME type input string")]
     InvalidInput,
     /// Unknown MIME type
-    #[error("Unknown MIME type")]
-    UnknownMimeType,
+    #[error("Unknown MIME type [{0}]")]
+    UnknownMimeType(String),
 }
 
 /// Known Audio or Video MIME type.
@@ -289,24 +289,66 @@ impl FromStr for MimeTypeAudio {
     type Err = ParseMimeTypeError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s.to_ascii_lowercase().as_str() {
-            "audio/opus" => Ok(Self::Opus),
-            "audio/multiopus" => Ok(Self::MultiChannelOpus),
-            "audio/pcmu" => Ok(Self::Pcmu),
-            "audio/pcma" => Ok(Self::Pcma),
-            "audio/isac" => Ok(Self::Isac),
-            "audio/g722" => Ok(Self::G722),
-            "audio/ilbc" => Ok(Self::Ilbc),
-            "audio/silk" => Ok(Self::Silk),
-            "audio/cn" => Ok(Self::Cn),
-            "audio/telephone-event" => Ok(Self::TelephoneEvent),
-            "audio/rtx" => Ok(Self::Rtx),
-            "audio/red" => Ok(Self::Red),
-            s => Err(if s.starts_with("audio/") {
-                ParseMimeTypeError::UnknownMimeType
-            } else {
-                ParseMimeTypeError::InvalidInput
-            }),
+        if let Some((mtype, name)) =  s.split_once('/') {
+            if mtype.eq_ignore_ascii_case("audio") {
+                return Self::from_name(name)
+                    .map_err(|_e|ParseMimeTypeError::UnknownMimeType(s.into()))
+            }
+        }
+        Err(ParseMimeTypeError::InvalidInput)
+
+        // let s = s.to_ascii_lowercase();
+        // match s.as_str() {
+        //     "audio/opus" => Ok(Self::Opus),
+        //     "audio/multiopus" => Ok(Self::MultiChannelOpus),
+        //     "audio/pcmu" => Ok(Self::Pcmu),
+        //     "audio/pcma" => Ok(Self::Pcma),
+        //     "audio/isac" => Ok(Self::Isac),
+        //     "audio/g722" => Ok(Self::G722),
+        //     "audio/ilbc" => Ok(Self::Ilbc),
+        //     "audio/silk" => Ok(Self::Silk),
+        //     "audio/cn" => Ok(Self::Cn),
+        //     "audio/telephone-event" => Ok(Self::TelephoneEvent),
+        //     "audio/rtx" => Ok(Self::Rtx),
+        //     "audio/red" => Ok(Self::Red),
+        //     _ => Err(if s.starts_with("audio/") {
+        //         ParseMimeTypeError::UnknownMimeType(s)
+        //     } else {
+        //         ParseMimeTypeError::InvalidInput
+        //     }),
+        // }
+    }
+}
+
+impl MimeTypeAudio {
+
+    pub fn from_name(s: &str) -> Result<Self, ()> {
+        if s.eq_ignore_ascii_case("opus") {
+            Ok(Self::Opus)
+        } else if s.eq_ignore_ascii_case("multiopus") {
+            Ok(Self::MultiChannelOpus)
+        } else if s.eq_ignore_ascii_case("pcmu") {
+            Ok(Self::Pcmu)
+        } else if s.eq_ignore_ascii_case("pcma") {
+            Ok(Self::Pcma)
+        } else if s.eq_ignore_ascii_case("isac") {
+            Ok(Self::Isac)
+        } else if s.eq_ignore_ascii_case("g722") {
+            Ok(Self::G722)
+        } else if s.eq_ignore_ascii_case("ilbc") {
+            Ok(Self::Ilbc)
+        } else if s.eq_ignore_ascii_case("silk") {
+            Ok(Self::Silk)
+        } else if s.eq_ignore_ascii_case("cn") {
+            Ok(Self::Cn)
+        } else if s.eq_ignore_ascii_case("telephone-event") {
+            Ok(Self::TelephoneEvent)
+        } else if s.eq_ignore_ascii_case("rtx") {
+            Ok(Self::Rtx)
+        } else if s.eq_ignore_ascii_case("red") {
+            Ok(Self::Red)
+        } else {
+            Err(())
         }
     }
 }
@@ -372,19 +414,52 @@ impl FromStr for MimeTypeVideo {
     type Err = ParseMimeTypeError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s.to_ascii_lowercase().as_str() {
-            "video/vp8" => Ok(Self::Vp8),
-            "video/vp9" => Ok(Self::Vp9),
-            "video/h264" => Ok(Self::H264),
-            "video/av1" => Ok(Self::AV1),
-            "video/rtx" => Ok(Self::Rtx),
-            "video/red" => Ok(Self::Red),
-            "video/ulpfec" => Ok(Self::Ulpfec),
-            s => Err(if s.starts_with("video/") {
-                ParseMimeTypeError::UnknownMimeType
-            } else {
-                ParseMimeTypeError::InvalidInput
-            }),
+        if let Some((mtype, name)) =  s.split_once('/') {
+            if mtype.eq_ignore_ascii_case("video") {
+                return Self::from_name(name)
+                    .map_err(|_e|ParseMimeTypeError::UnknownMimeType(s.into()))
+            }
+        }
+        Err(ParseMimeTypeError::InvalidInput)
+        
+
+        // let s = s.to_ascii_lowercase();
+        // match s.as_str() {
+        //     "video/vp8" => Ok(Self::Vp8),
+        //     "video/vp9" => Ok(Self::Vp9),
+        //     "video/h264" => Ok(Self::H264),
+        //     "video/av1" => Ok(Self::AV1),
+        //     "video/rtx" => Ok(Self::Rtx),
+        //     "video/red" => Ok(Self::Red),
+        //     "video/ulpfec" => Ok(Self::Ulpfec),
+        //     _ => Err(if s.starts_with("video/") {
+        //         ParseMimeTypeError::UnknownMimeType(s)
+        //     } else {
+        //         ParseMimeTypeError::InvalidInput
+        //     }),
+        // }
+    }
+}
+
+impl MimeTypeVideo {
+
+    pub fn from_name(s: &str) -> Result<Self, ()> {
+        if s.eq_ignore_ascii_case("vp8") {
+            Ok(Self::Vp8)
+        } else if s.eq_ignore_ascii_case("vp9") {
+            Ok(Self::Vp9)
+        } else if s.eq_ignore_ascii_case("h264") {
+            Ok(Self::H264)
+        } else if s.eq_ignore_ascii_case("av1") {
+            Ok(Self::AV1)
+        } else if s.eq_ignore_ascii_case("rtx") {
+            Ok(Self::Rtx)
+        } else if s.eq_ignore_ascii_case("red") {
+            Ok(Self::Red)
+        } else if s.eq_ignore_ascii_case("ulpfec") {
+            Ok(Self::Ulpfec)
+        } else {
+            Err(())
         }
     }
 }

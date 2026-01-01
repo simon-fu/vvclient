@@ -162,6 +162,7 @@ pub struct IceCandidate {
     /// The assigned priority of the candidate.
     pub priority: u32,
     /// The IP address or hostname of the candidate.
+    #[serde(alias = "ip")]
     pub address: String,
     /// The protocol of the candidate.
     pub protocol: Protocol,
@@ -315,6 +316,29 @@ pub enum DtlsRole {
 impl Default for DtlsRole {
     fn default() -> Self {
         Self::Auto
+    }
+}
+
+impl DtlsRole {
+    pub fn as_sdp(&self) -> &'static str {
+        match self {
+            DtlsRole::Client => "active", 
+            DtlsRole::Server => "passive",
+            DtlsRole::Auto => "actpass",
+        }
+    }
+}
+
+impl core::str::FromStr for DtlsRole {
+    type Err = core::fmt::Error;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Ok(match s {
+            "active"  => DtlsRole::Client,
+            "passive" => DtlsRole::Server,
+            "actpass" => DtlsRole::Auto,
+            _ => return Err(core::fmt::Error)
+        })
     }
 }
 
@@ -767,7 +791,7 @@ impl DtlsFingerprint {
         }
     }
 
-    fn algorithm_str(&self) -> &'static str {
+    pub fn algorithm_str(&self) -> &'static str {
         match self {
             DtlsFingerprint::Sha1 { .. } => "sha-1",
             DtlsFingerprint::Sha224 { .. } => "sha-224",
