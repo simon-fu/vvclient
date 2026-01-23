@@ -524,3 +524,33 @@ impl SubReturn {
 //         }
 //     }
 // }
+
+
+#[derive(uniffi::Record)]
+#[derive(Debug)]
+pub struct UnsubCall {
+    pub consumer_id: String,
+}
+
+#[derive(uniffi::Record)]
+#[derive(Debug)]
+pub struct UnsubReturn {
+    
+}
+
+impl UnsubReturn {
+    pub fn try_new(response: proto::response::ResponseType) -> Result<Self> {
+        match response {
+            proto::response::ResponseType::USub(_rsp) => {
+                Result::<_>::Ok(Self {
+                    
+                })
+            }
+            _ => {
+                let e = anyhow::anyhow!("Unexpect response of [{}], {response:?}", stringify!(USub));
+                return Err(e)
+            },
+        }
+    }
+}
+

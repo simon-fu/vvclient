@@ -33,12 +33,16 @@ impl TungConnector {
             let verifier = tls_utils::verifier::CustomCertVerifier::new_dummy();
 
             let client_crypto = {
-
+                // rustls::ClientConfig::builder_with_protocol_versions(&[&rustls::version::TLS13, &rustls::version::TLS12])
                 rustls::ClientConfig::builder()
                 .dangerous()
                 .with_custom_certificate_verifier(verifier)
                 .with_no_client_auth()
             };
+
+            // // WSS 握手必须声明自己使用 http/1.1 协议
+            // client_crypto.alpn_protocols = vec![b"h2".to_vec(), b"http/1.1".to_vec()];
+
 
             let client_crypto = std::sync::Arc::new(client_crypto);
             Some(Connector::Rustls(client_crypto))

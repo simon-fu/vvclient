@@ -19,6 +19,7 @@ uniffi = { version = "0.30", features = ["bindgen-tests"] }
 
 [features]
 ffi-trace = ["uniffi/ffi-trace"]
+no-jni-onload = []
 
 [dependencies]
 uniffi = { version = "0.30", features = ["scaffolding-ffi-buffer-fns", "cli"] }
@@ -48,8 +49,8 @@ num_enum = "0.7.5"
 strum_macros = "0.27.2"
 prost = "0.14.1"
 
-rustls = { version = "0.23.35", default-features = false, features = ["ring"] }
-tokio-rustls = { version = "0.26.4", default-features = false, features = ["ring"] }
+rustls = { version = "0.23.35", default-features = false, features = ["ring", "tls12"] }
+tokio-rustls = { version = "0.26.4", default-features = false, features = ["ring", "tls12"] }
 rustls-pemfile = "2.2.0"
 webpki-roots = "1.0.4"
 

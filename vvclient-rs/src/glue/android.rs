@@ -2,6 +2,7 @@
 #![cfg(target_os = "android")]
 
 
+#[cfg(not(feature = "no-jni-onload"))]
 #[allow(non_snake_case)]
 #[unsafe(no_mangle)]
 pub extern "C" fn JNI_OnLoad(_vm: *mut jni::sys::JavaVM, _: *mut std::os::raw::c_void) -> jni::sys::jint {

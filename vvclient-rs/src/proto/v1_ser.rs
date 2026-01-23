@@ -362,6 +362,34 @@ pub enum SubTypeSer<T> {
 
 #[derive(serde::Serialize, Clone, PartialEq, Debug)]
 #[serde(rename_all = "camelCase")]
+pub struct UnsubscribeRequestSer<'a> {
+    pub room_id: &'a str,
+
+    /// 消费者 Id
+    pub consumer_id: &'a str,
+
+}
+
+impl<'a> UnsubscribeRequestSer<'a> {
+    pub fn into_msg(self) -> ClientRequestSer<USubTypeSer<Self>> {
+        ClientRequestSer {
+            typ: USubTypeSer::USub(self)
+        }
+    }
+
+    pub fn into_body(self) -> JsonDisplay<ClientRequestSer<USubTypeSer<Self>>> {
+        JsonDisplay(self.into_msg())
+    }
+}
+
+#[derive(serde::Serialize, Clone, PartialEq, Debug)]
+pub enum USubTypeSer<T> {
+    USub(T),
+}
+
+
+#[derive(serde::Serialize, Clone, PartialEq, Debug)]
+#[serde(rename_all = "camelCase")]
 pub struct BatchEndRequestSer {
 
 }

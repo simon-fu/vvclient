@@ -176,4 +176,7 @@ pub async fn sleep_until(deadline: Instant) {
     tokio::time::sleep_until(deadline.into()).await;
 }
 
+pub fn block_on<F: Future>(future: F) -> F::Output {
+    get_inst().runtime.block_on(future)
+}
 

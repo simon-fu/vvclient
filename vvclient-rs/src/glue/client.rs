@@ -39,7 +39,7 @@ pub fn make_signal_client(url: String, config: records::SignalConfig, listener: 
         users: Default::default(),
         response_handlers: Default::default(),
         dlink_x_id: Default::default(),
-        // got_room_ready: false,
+        got_room_ready: false,
     };
 
     let shared = delegate.shared.clone();
@@ -136,6 +136,29 @@ impl SignalClient {
         Ok(())
 
     }
+
+    #[trace_result]
+    pub fn unsub_stream(&self, req: records::UnsubCall, cb: Arc<dyn CbResolveUSub>) -> GlueResult<()> {
+
+        self.commit_op(Op::Request(Box::new(move |delegate, session| {
+
+            let body = proto::UnsubscribeRequestSer {
+                room_id: "".into(), 
+                consumer_id: &req.consumer_id,
+            }.into_body();
+
+            let sn = session.xfer_mut().add_qos1_json(proto::PacketType::Request, &body, None)?;
+            delegate.response_handlers.insert(sn, Box::new(move |_delegate, response| {
+                let ret = records::UnsubReturn::try_new(response)?;
+                cb.resolve(ret)?;
+                Ok(())
+            }));
+            Ok(())
+        })))?;
+
+        Ok(())
+
+    }
 }
 
 
@@ -164,6 +187,10 @@ pub trait CbResolveSub : Send + Sync {
     fn resolve(&self, response: records::SubReturn) -> ForeignResult<()>;
 }
 
+#[uniffi::export(with_foreign)]
+pub trait CbResolveUSub : Send + Sync {
+    fn resolve(&self, response: records::UnsubReturn) -> ForeignResult<()>;
+}
 
 impl SignalClient {
     pub async fn into_finish(self) {
@@ -214,7 +241,7 @@ struct DelegateImpl<L> {
     response_handlers: HashMap<i64, ResponseResolver<L>>,
     users: HashMap<AStr, UserCell>,
     dlink_x_id: Option<String>,
-    // got_room_ready: bool,
+    got_room_ready: bool,
 }
 
 impl<L: Listener> DelegateImpl<L> {
@@ -371,7 +398,9 @@ impl<L: Listener> DelegateImpl<L> {
 
                 user.stage = UserStage::Ready;
 
-                fire_user_joined(&self.listener, &user_id, user)?;
+                if self.got_room_ready {
+                    fire_user_joined(&self.listener, &user_id, user)?;
+                }
 
                 // self.handle_extra_user(session, &user_id).await?;
             },
@@ -455,27 +484,33 @@ impl<L: Listener> DelegateImpl<L> {
             },
             proto::ServerPushType::RReady(_id) => {
                 self.listener.on_room_ready()?;
-                // self.got_room_ready = true;
+                self.got_room_ready = true;
                 // self.check_fire_room_ready()?;
+
+                for (user_id, user) in self.users.iter_mut() {
+                    fire_user_joined(&self.listener, &user_id, user)?;
+                }
+                
+
             },
         }
         Ok(())
     }
 }
 
-fn fire_user_joined<L: Listener>(listener: &L, user_id: &String, user: &mut UserCell) -> Result<()> {
+fn fire_user_joined<L: Listener>(listener: &L, user_id: &str, user: &mut UserCell) -> Result<()> {
 
     let tree = core::mem::replace(&mut user.tree, Vec::new());
 
     let brief = user.brief();
     listener.on_user_joined(OnUserJoinedArgs {
-        user_id: user_id.clone(), 
+        user_id: user_id.to_owned(), 
         tree,
     })?;
 
     if let Some(muted) = brief.camera_muted {
         listener.on_add_stream(OnAddStreamArgs {
-            user_id: user_id.clone(), 
+            user_id: user_id.to_owned(), 
             muted,
             stype: records::StreamType::Camera, 
         })?;
@@ -483,7 +518,7 @@ fn fire_user_joined<L: Listener>(listener: &L, user_id: &String, user: &mut User
     
     if let Some(muted) = brief.mic_muted {
         listener.on_add_stream(OnAddStreamArgs {
-            user_id: user_id.clone(), 
+            user_id: user_id.to_owned(), 
             muted,
             stype: records::StreamType::Mic, 
         })?;
@@ -491,7 +526,7 @@ fn fire_user_joined<L: Listener>(listener: &L, user_id: &String, user: &mut User
 
     if let Some(muted) = brief.screen_muted {
         listener.on_add_stream(OnAddStreamArgs {
-            user_id: user_id.clone(), 
+            user_id: user_id.to_owned(), 
             muted,
             stype: records::StreamType::Screen, 
         })?;
@@ -804,6 +839,15 @@ where
     F: Fn(records::SubReturn) -> ForeignResult<()> + Send + Sync,
 {
     fn resolve(&self, response: records::SubReturn) -> ForeignResult<()>  {
+        self.0(response)
+    }
+}
+
+impl<F> CbResolveUSub for ResolveFn<F> 
+where 
+    F: Fn(records::UnsubReturn) -> ForeignResult<()> + Send + Sync,
+{
+    fn resolve(&self, response: records::UnsubReturn) -> ForeignResult<()>  {
         self.0(response)
     }
 }
