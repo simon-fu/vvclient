@@ -7,6 +7,7 @@ use log::{debug, warn};
 
 use parking_lot::Mutex;
 
+use tokio::sync::oneshot;
 use tracing::instrument;
 
 use trace_error::anyhow::trace_result;
@@ -40,6 +41,7 @@ pub fn make_signal_client(url: String, config: records::SignalConfig, listener: 
         response_handlers: Default::default(),
         dlink_x_id: Default::default(),
         got_room_ready: false,
+        leave_tx: None,
     };
 
     let shared = delegate.shared.clone();
@@ -65,13 +67,28 @@ pub struct SignalClient {
 #[uniffi::export]
 impl SignalClient {
 
+    // #[trace_result]
+    // pub fn leave_room(&self, end: Option<bool>) {
+    //     let r = self.commit_op(Op::Leave {end, tx: None});
+    //     if let Err(e) = r {
+    //         warn!("{}", trace_fmt!("close failed", e));
+    //     }
+    // }
+
     #[trace_result]
-    pub fn leave_room(&self, status: records::Status) {
-        let r = self.commit_op(Op::Leave(status));
-        if let Err(e) = r {
-            warn!("{}", trace_fmt!("close failed", e));
+    pub async fn leave_room_and_wait(&self, end: Option<bool>) {
+        let (tx, rx) = oneshot::channel();
+        let r = self.commit_op(Op::Leave {end, tx: Some(tx)});
+        match r {
+            Ok(()) => {
+                let _ = rx.await;
+            },
+            Err(e) => {
+                warn!("{}", trace_fmt!("close failed", e));
+            }
         }
     }
+
 
     #[trace_result]
     pub fn conn_x(&self, req: records::ConnXCall, cb: Arc<dyn CbResolveConnX>) -> GlueResult<()> {
@@ -242,6 +259,7 @@ struct DelegateImpl<L> {
     users: HashMap<AStr, UserCell>,
     dlink_x_id: Option<String>,
     got_room_ready: bool,
+    leave_tx: Option<oneshot::Sender<()>>,
 }
 
 impl<L: Listener> DelegateImpl<L> {
@@ -263,8 +281,9 @@ impl<L: Listener> DelegateImpl<L> {
     #[trace_result]
     async fn process_op(&mut self, session: &mut Session, msg: Op<L>) -> Result<()> {
         match msg {
-            Op::Leave(status)=>{
-                session.set_close(status.into());
+            Op::Leave{end, tx}=>{
+                // session.set_close(status.into());
+                self.req_leave(session.xfer_mut(), end, tx)?;
             },
             Op::Request(func) => {
                 func(self, session)?;
@@ -313,6 +332,31 @@ impl<L: Listener> DelegateImpl<L> {
 
             Ok(())
         }))?;
+
+        Ok(())
+    }
+
+    #[trace_result]
+    fn req_leave(&mut self, xfer: &mut Xfer, end: Option<bool>, tx: Option<oneshot::Sender<()>>) -> Result<()> {
+
+        let body = proto::CloseSessionRequestSer {
+            room_id: "".into(),
+            end,
+        }.into_body();
+
+
+        self.send_request(xfer, &body, Box::new(move |_delegate, response| {
+            match response {
+                proto::response::ResponseType::Close(_rsp) => {},
+                _ => {
+                    return Err(anyhow::anyhow!("invalid response type for CloseSession"));
+                }
+            }  
+
+            Ok(())
+        }))?;
+
+        self.leave_tx = tx;
 
         Ok(())
     }
@@ -562,6 +606,10 @@ impl<L: Listener> Delegate for DelegateImpl<L> {
 
     #[instrument(skip_all)]
     async fn on_closed(&mut self, status: proto::Status) -> Result<()> {
+        if let Some(tx) = self.leave_tx.take() {
+            let _ = tx.send(());
+        }
+
         self.listener.on_closed(OnClosedArgs {
             status: status.into(),
         })?;
@@ -622,7 +670,7 @@ impl<L> Shared<L> {
 
 
 enum Op<L> {
-    Leave(records::Status),
+    Leave { end: Option<bool>, tx: Option<oneshot::Sender<()>> },
     Request(RequestBuilder<L>),
 }
 

@@ -412,6 +412,34 @@ pub enum BatchEndTypeSer<T> {
 }
 
 
+#[derive(serde::Serialize, Clone, PartialEq, Debug)]
+pub struct CloseSessionRequestSer<'a> {
+
+    /// Room Id
+    pub room_id: &'a str,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub end: Option<bool>,
+}
+
+impl<'a> CloseSessionRequestSer<'a> {
+    pub fn into_msg(self) -> ClientRequestSer<CloseSessionTypeSer<Self>> {
+        ClientRequestSer {
+            typ: CloseSessionTypeSer::Close(self)
+        }
+    }
+
+    pub fn into_body(self) -> JsonDisplay<ClientRequestSer<CloseSessionTypeSer<Self>>> {
+        JsonDisplay(self.into_msg())
+    }
+}
+
+#[derive(serde::Serialize, Clone, PartialEq, Debug)]
+pub enum CloseSessionTypeSer<T> {
+    Close(T),
+}
+
+
 
 pub trait IntoIterSerialize {
     fn into_iter_ser(self) -> impl serde::Serialize;

@@ -62,6 +62,21 @@ pub struct Status {
     pub reason: String,
 }
 
+impl Default for Status {
+    fn default() -> Self {
+        Self::success()
+    }
+}
+
+impl Status {
+    pub fn success() -> Self {
+        Self {
+            code: 0,
+            reason: "OK".into(),
+        }
+    }
+}
+
 impl From<proto::Status> for Status {
     fn from(value: proto::Status) -> Self {
         Self {

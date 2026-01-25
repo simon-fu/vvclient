@@ -160,6 +160,12 @@ impl<T: Delegate> Task<T> {
                 r?;
             } else {
                 if let Err(e) = r {
+                    let status = proto::Status::from(&e);
+                    if status.code == 0 {
+                        debug!("phase_work ended with no error status");
+                        return Ok(())
+                    }
+                    
                     error!("{}", trace_fmt!("phase_work failed", e));
                 }
             }
@@ -464,7 +470,7 @@ impl<T: Delegate> Task<T> {
             conn_id: rsp.conn_id,
             xfer,
             conn,
-            close_status: Default::default(),
+            // close_status: Default::default(),
         };
 
         info!("opened session [{}], conn_id [{}]", session.session_id, session.conn_id);
@@ -752,7 +758,7 @@ pub struct Session {
     conn_id: String,
     xfer: Xfer,
     conn: Conn,
-    close_status: Option<proto::Status>,
+    // close_status: Option<proto::Status>,
 }
 
 impl Session {
@@ -760,9 +766,9 @@ impl Session {
         &self.session_id
     }
     
-    pub fn set_close(&mut self, status: proto::Status) {
-        self.close_status = Some(status);
-    }
+    // pub fn set_close(&mut self, status: proto::Status) {
+    //     self.close_status = Some(status);
+    // }
 
     pub fn xfer_mut(&mut self) -> &mut Xfer {
         &mut self.xfer
