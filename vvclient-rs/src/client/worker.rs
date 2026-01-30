@@ -611,9 +611,30 @@ impl<T: Delegate> Task<T> {
     async fn open_session_send(&mut self, conn: &mut Conn) -> Result<()> {
         use crate::proto::IntoIterSerialize;
 
+        let client_info = self.config.advance.client_info.as_ref().map(|ci| {
+            let device: Option<std::collections::HashMap<&str, &str>> = ci.device.as_ref().map(|m| {
+                m.iter().map(|(k, v)| (k.as_str(), v.as_str())).collect()
+            });
+            let sdk = if ci.sdk_name.is_some() || ci.sdk_version.is_some() {
+                Some(proto::SdkInfoSer {
+                    name: ci.sdk_name.as_deref(),
+                    version: ci.sdk_version.as_deref(),
+                })
+            } else {
+                None
+            };
+            proto::ClientInfoSer {
+                platform: ci.platform.as_deref(),
+                sdk,
+                device,
+            }
+        });
+
         let req = proto::OpenSessionRequestSer {
             user_id: &self.config.user_id,
             room_id: &self.config.room_id,
+            client_info,
+            token: self.config.advance.token.as_deref(),
             user_ext: self.config.advance.user_ext.as_deref(),
             user_tree: self.config.advance.user_tree
                 .as_ref()
@@ -824,4 +845,3 @@ pub trait Delegate: Send + Sync + 'static {
     fn on_response(&mut self, session: &mut Session, ack: i64, response: proto::ServerResponse) -> impl Future<Output = Result<()>> + Send;
     fn on_push(&mut self, session: &mut Session, push: proto::ServerPush) -> impl Future<Output = Result<()>> + Send;
 }
-

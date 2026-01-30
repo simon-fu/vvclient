@@ -81,10 +81,11 @@ impl SignalClient {
         let r = self.commit_op(Op::Leave {end, tx: Some(tx)});
         match r {
             Ok(()) => {
-                let _ = rx.await;
+                let r = rx.await;
+                debug!("leave_room_and_wait completed, is_ok {}", r.is_ok());
             },
             Err(e) => {
-                warn!("{}", trace_fmt!("close failed", e));
+                warn!("{}", trace_fmt!("leave failed", e));
             }
         }
     }
@@ -345,9 +346,12 @@ impl<L: Listener> DelegateImpl<L> {
         }.into_body();
 
 
+        debug!("sending leave");
         self.send_request(xfer, &body, Box::new(move |_delegate, response| {
             match response {
-                proto::response::ResponseType::Close(_rsp) => {},
+                proto::response::ResponseType::Close(_rsp) => {
+                    debug!("leave response received");
+                },
                 _ => {
                     return Err(anyhow::anyhow!("invalid response type for CloseSession"));
                 }
@@ -606,8 +610,10 @@ impl<L: Listener> Delegate for DelegateImpl<L> {
 
     #[instrument(skip_all)]
     async fn on_closed(&mut self, status: proto::Status) -> Result<()> {
+        debug!("recv on_closed, status [{:?}], leave_tx {}", status, self.leave_tx.is_some());
         if let Some(tx) = self.leave_tx.take() {
-            let _ = tx.send(());
+            let r = tx.send(());
+            debug!("sent leave_tx, is_ok {}", r.is_ok());
         }
 
         self.listener.on_closed(OnClosedArgs {

@@ -1,5 +1,7 @@
 
 
+use std::collections::HashMap;
+
 use crate::proto::{fmt_writer::JsonDisplay, mediasoup};
 
 use super::UpdateTreeRequest;
@@ -66,7 +68,7 @@ pub enum OpenTypeSer<T> {
 
 
 #[derive(serde::Serialize, Clone, PartialEq, Debug)]
-pub struct OpenSessionRequestSer<'a, UTREE> 
+pub struct OpenSessionRequestSer<'a, UTREE, DEVICE> 
 // where 
 //     // UTREE: Iterator<Item = UpdateTreeRequestRef<'a>> + 'a,
 //     UTREE: serde::Serialize,
@@ -74,6 +76,12 @@ pub struct OpenSessionRequestSer<'a, UTREE>
     pub user_id: &'a str,
 
     pub room_id: &'a str,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub client_info: Option<ClientInfoSer<'a, DEVICE>>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub token: Option<&'a str>,
 
     #[serde(skip_serializing_if = "Option::is_none")]
     pub user_ext: Option<&'a str>,
@@ -88,7 +96,7 @@ pub struct OpenSessionRequestSer<'a, UTREE>
     // pub create_x_requests: Option<XREQS>,  
 }
 
-impl<'a, UTREE> OpenSessionRequestSer<'a, UTREE> {
+impl<'a, UTREE, DEVICE> OpenSessionRequestSer<'a, UTREE, DEVICE> {
     fn into_msg(self) -> ClientRequestSer<OpenTypeSer<Self>> {
         ClientRequestSer {
             typ: OpenTypeSer::Open(self)
@@ -99,6 +107,31 @@ impl<'a, UTREE> OpenSessionRequestSer<'a, UTREE> {
         JsonDisplay(self.into_msg())
     }
 }
+
+#[derive(serde::Serialize, Clone, PartialEq, Debug)]
+pub struct ClientInfoSer<'a, DEVICE=HashMap<&'a str, &'a str>> {
+    /// 客户端平台类型，如 Android / iOS / Windows
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub platform: Option<&'a str>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sdk: Option<SdkInfoSer<'a>>,
+
+    /// 平台相关的设备信息，使用 key-value 承载
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub device: Option<DEVICE>, // HashMap<String, String> 或者 HashMap<&str, &str>
+}
+
+#[derive(serde::Serialize, Clone, PartialEq, Debug)]
+pub struct SdkInfoSer<'a> {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub name: Option<&'a str>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub version: Option<&'a str>,
+}
+
+
 
 
 #[derive(serde::Serialize, Clone, PartialEq, Debug)]
@@ -520,6 +553,8 @@ mod tests {
                     .into_iter_ser()
                 ),
             batch: None,
+            client_info: Option::<ClientInfoSer<'static>>::None,
+            token: None,
             // create_x_requests: Option::<()>::None,
         };
 

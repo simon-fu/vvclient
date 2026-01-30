@@ -784,9 +784,30 @@ impl<T: Types> Worker<T> {
     async fn open_session_send(&mut self, conn: &mut Conn) -> Result<()> {
         use crate::proto::IntoIterSerialize;
 
+        let client_info = self.config.advance.client_info.as_ref().map(|ci| {
+            let device: Option<std::collections::HashMap<&str, &str>> = ci.device.as_ref().map(|m| {
+                m.iter().map(|(k, v)| (k.as_str(), v.as_str())).collect()
+            });
+            let sdk = if ci.sdk_name.is_some() || ci.sdk_version.is_some() {
+                Some(proto::SdkInfoSer {
+                    name: ci.sdk_name.as_deref(),
+                    version: ci.sdk_version.as_deref(),
+                })
+            } else {
+                None
+            };
+            proto::ClientInfoSer {
+                platform: ci.platform.as_deref(),
+                sdk,
+                device,
+            }
+        });
+
         let req = proto::OpenSessionRequestSer {
             user_id: &self.config.user_id,
             room_id: &self.config.room_id,
+            client_info,
+            token: self.config.advance.token.as_deref(),
             user_ext: self.config.advance.user_ext.as_deref(),
             user_tree: self.config.advance.user_tree
                 .as_ref()
@@ -794,6 +815,7 @@ impl<T: Types> Worker<T> {
                     x.iter().map(|y|proto::UpdateTreeRequestSer::from(y))
                     .into_iter_ser()
                 ),
+            batch: self.config.advance.batch,
         };
 
         let packet = proto::PacketSer {
@@ -1044,6 +1066,20 @@ pub struct JoinAdvanceArgs {
     pub user_tree: Option<Vec<proto::UpdateTreeRequest>>, 
 
     pub connection: ConnectionConfig,
+
+    pub batch: Option<bool>,
+
+    pub token: Option<AStr>,
+
+    pub client_info: Option<ClientInfo>,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct ClientInfo {
+    pub platform: Option<AStr>,
+    pub sdk_name: Option<AStr>,
+    pub sdk_version: Option<AStr>,
+    pub device: Option<HashMap<AStr, AStr>>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -1196,5 +1232,3 @@ struct OpRequest<T: Types> {
     body: String,
     handler: T::ResponseHandler,
 }
-
-

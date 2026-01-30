@@ -75,6 +75,8 @@ async fn run_client() -> Result<()> {
             user_id: user_id.clone(),
             room_id: room_id.clone(),
             ignore_server_cert: true,
+            token: None,
+            client_info: None,
         }, 
         std::sync::Arc::new(ListenerImpl {tx}),
     )?;
@@ -234,5 +236,4 @@ impl vvclient::glue::client::Listener for ListenerImpl {
     }
 
 }
-
 

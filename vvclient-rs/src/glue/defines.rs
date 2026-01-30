@@ -3,7 +3,7 @@ use core::fmt;
 use strum_macros::FromRepr;
 use trace_error::anyhow::trace_result;
 
-use crate::{client::defines::{ConnectionConfig, JoinAdvanceArgs, JoinConfig}, proto::{self, fmt_writer::JsonDisplay, mediasoup}};
+use crate::{client::defines::{ClientInfo as ClientInfoInner, ConnectionConfig, JoinAdvanceArgs, JoinConfig}, proto::{self, fmt_writer::JsonDisplay, mediasoup}};
 
 use anyhow::{Result, Error};
 // use super::error::Error;
@@ -19,10 +19,22 @@ pub struct SignalConfig {
     pub room_id: String,
 
     pub ignore_server_cert: bool,
+
+    pub token: Option<String>,
+
+    pub client_info: Option<ClientInfo>,
 }
 
 impl Into<JoinConfig> for SignalConfig {
     fn into(self) -> JoinConfig {
+        let client_info = self.client_info.map(|ci| {
+            ClientInfoInner {
+                platform: ci.platform.map(Into::into),
+                sdk_name: ci.sdk_name.map(Into::into),
+                sdk_version: ci.sdk_version.map(Into::into),
+                device: ci.device.map(|m| m.into_iter().map(|(k, v)| (k.into(), v.into())).collect()),
+            }
+        });
         JoinConfig {
             user_id: self.user_id.into(),
             room_id: self.room_id.into(),
@@ -32,10 +44,21 @@ impl Into<JoinConfig> for SignalConfig {
                     ignore_server_cert: self.ignore_server_cert,
                     ..Default::default()
                 },
+                token: self.token.map(Into::into),
+                client_info,
                 ..Default::default()
             },
         }
     }
+}
+
+#[derive(uniffi::Record)]
+#[derive(Debug, Clone)]
+pub struct ClientInfo {
+    pub platform: Option<String>,
+    pub sdk_name: Option<String>,
+    pub sdk_version: Option<String>,
+    pub device: Option<std::collections::HashMap<String, String>>,
 }
 
 pub trait ToBody {
@@ -568,4 +591,3 @@ impl UnsubReturn {
         }
     }
 }
-

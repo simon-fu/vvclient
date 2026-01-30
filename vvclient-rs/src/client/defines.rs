@@ -1,6 +1,6 @@
 
 
-use std::time::Duration;
+use std::{collections::HashMap, time::Duration};
 
 use crate::{kit::astr::AStr, proto};
 
@@ -24,6 +24,18 @@ pub struct JoinAdvanceArgs {
     pub connection: ConnectionConfig,
 
     pub batch: Option<bool>,
+
+    pub token: Option<AStr>,
+
+    pub client_info: Option<ClientInfo>,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct ClientInfo {
+    pub platform: Option<AStr>,
+    pub sdk_name: Option<AStr>,
+    pub sdk_version: Option<AStr>,
+    pub device: Option<HashMap<AStr, AStr>>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -60,4 +72,3 @@ impl ConnectionConfig {
         self.retry_interval.unwrap_or(Duration::from_secs(1))
     }
 }
-
