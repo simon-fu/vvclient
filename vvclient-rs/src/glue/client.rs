@@ -41,7 +41,6 @@ pub fn make_signal_client(url: String, config: records::SignalConfig, listener: 
         response_handlers: Default::default(),
         dlink_x_id: Default::default(),
         got_room_ready: false,
-        leave_tx: None,
     };
 
     let shared = delegate.shared.clone();
@@ -76,16 +75,25 @@ impl SignalClient {
     // }
 
     #[trace_result]
-    pub async fn leave_room_and_wait(&self, end: Option<bool>) {
+pub async fn leave_room_and_wait(&self, end: Option<bool>) {
         let (tx, rx) = oneshot::channel();
-        let r = self.commit_op(Op::Leave {end, tx: Some(tx)});
+        if self.shared.is_closed() {
+            debug!("leave_room_and_wait: already closed, skipping");
+            return;
+        }
+        // TODO(ios-compat): ensure leave wait unblocks even if on_closed arrives before Op::Leave is processed.
+        self.shared.set_leave_tx(tx);
+        debug!("leave_room_and_wait: commit_op start");
+        let r = self.commit_op(Op::Leave {end, tx: None});
         match r {
             Ok(()) => {
+                debug!("leave_room_and_wait: commit_op ok, awaiting on_closed");
                 let r = rx.await;
-                debug!("leave_room_and_wait completed, is_ok {}", r.is_ok());
+                debug!("leave_room_and_wait: on_closed received, is_ok {}", r.is_ok());
             },
             Err(e) => {
-                warn!("{}", trace_fmt!("leave failed", e));
+                self.shared.clear_leave_tx();
+                warn!("leave_room_and_wait: commit_op failed: {}", trace_fmt!("leave failed", e));
             }
         }
     }
@@ -260,7 +268,6 @@ struct DelegateImpl<L> {
     users: HashMap<AStr, UserCell>,
     dlink_x_id: Option<String>,
     got_room_ready: bool,
-    leave_tx: Option<oneshot::Sender<()>>,
 }
 
 impl<L: Listener> DelegateImpl<L> {
@@ -283,8 +290,10 @@ impl<L: Listener> DelegateImpl<L> {
     async fn process_op(&mut self, session: &mut Session, msg: Op<L>) -> Result<()> {
         match msg {
             Op::Leave{end, tx}=>{
+                debug!("process_op: Op::Leave start end={:?} tx_present={}", end, tx.is_some());
                 // session.set_close(status.into());
                 self.req_leave(session.xfer_mut(), end, tx)?;
+                debug!("process_op: Op::Leave request queued");
             },
             Op::Request(func) => {
                 func(self, session)?;
@@ -345,12 +354,11 @@ impl<L: Listener> DelegateImpl<L> {
             end,
         }.into_body();
 
-
-        debug!("sending leave");
+        debug!("req_leave: sending CloseSession");
         self.send_request(xfer, &body, Box::new(move |_delegate, response| {
             match response {
                 proto::response::ResponseType::Close(_rsp) => {
-                    debug!("leave response received");
+                    debug!("req_leave: CloseSession response received");
                 },
                 _ => {
                     return Err(anyhow::anyhow!("invalid response type for CloseSession"));
@@ -360,7 +368,7 @@ impl<L: Listener> DelegateImpl<L> {
             Ok(())
         }))?;
 
-        self.leave_tx = tx;
+        debug!("req_leave: request queued, storing leave_tx {}", tx.is_some());
 
         Ok(())
     }
@@ -610,8 +618,9 @@ impl<L: Listener> Delegate for DelegateImpl<L> {
 
     #[instrument(skip_all)]
     async fn on_closed(&mut self, status: proto::Status) -> Result<()> {
-        debug!("recv on_closed, status [{:?}], leave_tx {}", status, self.leave_tx.is_some());
-        if let Some(tx) = self.leave_tx.take() {
+        self.shared.set_closed();
+        debug!("recv on_closed, status [{:?}], leave_tx {}", status, self.shared.has_leave_tx());
+        if let Some(tx) = self.shared.take_leave_tx() {
             let r = tx.send(());
             debug!("sent leave_tx, is_ok {}", r.is_ok());
         }
@@ -660,17 +669,43 @@ impl<L: Listener> Delegate for DelegateImpl<L> {
 
 struct Shared<L> {
     inbox: Mutex<VecDeque<Op<L>>>,
+    leave_tx: Mutex<Option<oneshot::Sender<()>>>,
+    closed: Mutex<bool>,
 }
 
 impl<L> Default for Shared<L> {
     fn default() -> Self {
-        Self { inbox: Default::default() }
+        Self { inbox: Default::default(), leave_tx: Default::default(), closed: Mutex::new(false) }
     }
 }
 
 impl<L> Shared<L> {
     fn pop_inbox(&self) -> Option<Op<L>> {
         self.inbox.lock().pop_front()
+    }
+
+    fn set_leave_tx(&self, tx: oneshot::Sender<()>) {
+        *self.leave_tx.lock() = Some(tx);
+    }
+
+    fn take_leave_tx(&self) -> Option<oneshot::Sender<()>> {
+        self.leave_tx.lock().take()
+    }
+
+    fn clear_leave_tx(&self) {
+        self.leave_tx.lock().take();
+    }
+
+    fn has_leave_tx(&self) -> bool {
+        self.leave_tx.lock().is_some()
+    }
+
+    fn set_closed(&self) {
+        *self.closed.lock() = true;
+    }
+
+    fn is_closed(&self) -> bool {
+        *self.closed.lock()
     }
 }
 
@@ -998,5 +1033,3 @@ pub trait Listener: Send + Sync + 'static {
 //     }
 
 // }
-
-
