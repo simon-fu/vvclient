@@ -13,6 +13,8 @@ use tracing::{Span, instrument};
 use trace_error::anyhow::trace_result;
 
 use std::time::{Duration, Instant};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicU8, Ordering};
 
 use crate::{client::{ws_tung::{TungConnector, TungStream}, xfer::Xfer}, kit::{astr::AStr, async_rt}, proto::{self}};
 
@@ -23,6 +25,7 @@ use super::defines::*;
 pub struct Worker {
     task_handle: JoinHandle<()>,
     tx: mpsc::Sender<()>,
+    shutdown_mode: Arc<AtomicU8>,
 }
 
 impl Worker {
@@ -53,6 +56,7 @@ impl Worker {
         let url: AStr = url.into();
 
         let (tx, rx) = mpsc::channel(1);
+        let shutdown_mode = Arc::new(AtomicU8::new(ShutdownMode::None as u8));
 
         let task = Task {
             connector: TungConnector::new(config.advance.connection.ignore_server_cert),
@@ -61,6 +65,7 @@ impl Worker {
             url,
             rx,
             listener,
+            shutdown_mode: shutdown_mode.clone(),
         };
 
         let span = match span {
@@ -75,6 +80,7 @@ impl Worker {
         Ok(Self {
             task_handle,
             tx,
+            shutdown_mode,
             // shared,
             // _mark: Default::default(),
         })
@@ -100,6 +106,10 @@ impl Worker {
         Ok(())
     }
 
+    pub fn set_shutdown_mode(&self, force: bool) {
+        let v = if force { ShutdownMode::Force } else { ShutdownMode::Graceful };
+        self.shutdown_mode.store(v as u8, Ordering::Relaxed);
+    }
 }
 
 
@@ -110,6 +120,7 @@ struct Task<T: Delegate> {
     rx: mpsc::Receiver<()>,
     flag: Flag,
     listener: T,
+    shutdown_mode: Arc<AtomicU8>,
 }
 
 impl<T: Delegate> Task<T> {
@@ -125,17 +136,14 @@ impl<T: Delegate> Task<T> {
                 proto::Status::default()
             },
             Err(e) => {
-                
-                let status: proto::Status = if !self.flag.got_closed {
+                if let Some(status) = self.flag.got_closed.take() {
+                    debug!("got closed");
+                    status
+                } else {
                     let err = trace_error!("finished error", e);
                     error!("{}", fmt_error!(err));
                     err.into()
-                } else {
-                    debug!("got closed");
-                    Default::default()
-                };
-                
-                status
+                }
             },
         };
 
@@ -154,6 +162,10 @@ impl<T: Delegate> Task<T> {
         // while !self.rx.is_closed() {
         loop {
             let r = self.phase_work(&mut session).await;
+
+            if self.flag.got_closed.is_some() {
+                return Ok(())
+            }
 
             if self.rx.is_closed() {
                 //  把错误往上抛
@@ -184,9 +196,12 @@ impl<T: Delegate> Task<T> {
         loop {
             self.try_handle_op(session).await.with_context(||"try_handle_msgs failed")?;
             
-            let r = self.recv_packet(&mut session.conn, &mut rraw).await.with_context(||"recv_packet falied")?;
+            let r = self.recv_packet(&mut session.conn, &mut rraw, RecvCancelMode::Work).await.with_context(||"recv_packet falied")?;
 
             let Some(packet) = r else {
+                if RecvCancelMode::Work.should_break(self.shutdown_mode()) {
+                    return Ok(())
+                }
                 continue;
             };
 
@@ -215,6 +230,10 @@ impl<T: Delegate> Task<T> {
                 | proto::PacketType::Push2
                 => {
                     let typed = packet.parse_as_server_push()?;
+                    if let proto::ServerPushType::Closed(notice) = typed.typ {
+                        self.flag.got_closed = Some(notice.status.unwrap_or_default());
+                        return Ok(())
+                    }
                     self.listener.on_push(session, typed).await?;
                 }
 
@@ -488,16 +507,21 @@ impl<T: Delegate> Task<T> {
     async fn open_loop<'a>(&mut self) -> Result<(Conn, PacketRaw, Xfer)> {
         loop {
 
-            let mut conn = self.connect_loop().await?;
+            let mut conn = self.connect_loop(RecvCancelMode::Connect).await?;
 
             let r = self.open_session(&mut conn).await;
 
             match r {
                 Ok((raw, xfer)) => return Ok((conn, raw, xfer)),
                 Err(e) => {
+                    if RecvCancelMode::Connect.should_break(self.shutdown_mode()) {
+                        return Err(e)
+                    }
                     warn!("{}", trace_fmt!("open_session failed", e));
                     debug!("will retry opening session in [{:?}]", self.config.advance.connection.retry_interval());
-                    self.sleep(self.config.advance.connection.retry_interval()).await?;
+                    if !self.sleep(self.config.advance.connection.retry_interval(), RecvCancelMode::Connect).await? {
+                        return Err(anyhow!("open canceled"))
+                    }
                     continue;
                 },
             };
@@ -509,16 +533,21 @@ impl<T: Delegate> Task<T> {
     async fn reconnect_loop<'a>(&mut self) -> Result<(Conn, PacketRaw)> {
         loop {
 
-            let mut conn = self.connect_loop().await?;
+            let mut conn = self.connect_loop(RecvCancelMode::Work).await?;
 
             let r = self.reconnect_session(&mut conn).await;
 
             match r {
                 Ok(raw) => return Ok((conn, raw)),
                 Err(e) => {
+                    if RecvCancelMode::Work.should_break(self.shutdown_mode()) {
+                        return Err(e)
+                    }
                     warn!("{}", trace_fmt!("reconnect_session failed", e));
                     debug!("will retry opening session in [{:?}]", self.config.advance.connection.retry_interval());
-                    self.sleep(self.config.advance.connection.retry_interval()).await?;
+                    if !self.sleep(self.config.advance.connection.retry_interval(), RecvCancelMode::Work).await? {
+                        return Err(anyhow!("reconnect canceled"))
+                    }
                     continue;
                 },
             };
@@ -534,14 +563,17 @@ impl<T: Delegate> Task<T> {
     }
 
     #[trace_result]
-    async fn connect_loop(&mut self) -> Result<Conn> {
+    async fn connect_loop(&mut self, mode: RecvCancelMode) -> Result<Conn> {
 
+        if mode.should_break(self.shutdown_mode()) {
+            return Err(anyhow!("connect canceled"))
+        }
 
         loop {
             
             debug!("connecting to [{}]...", self.url);
             
-            let r = self.connect_to().await;
+            let r = self.connect_to(mode).await;
 
             let cfg = &self.config.advance.connection;
 
@@ -551,23 +583,31 @@ impl<T: Delegate> Task<T> {
                     return Ok(conn)
                 },
                 Err(e) => {
+                    if mode.should_break(self.shutdown_mode()) {
+                        return Err(e)
+                    }
                     warn!("{}", trace_fmt!("connect failed", e))
                 }
             }
 
             debug!("will retry connecting in [{:?}]", cfg.retry_interval());
-            self.sleep(cfg.retry_interval()).await?;
+            if !self.sleep(cfg.retry_interval(), mode).await? {
+                return Err(anyhow!("connect canceled"))
+            }
         }
     }
 
     #[trace_result]
-    async fn connect_to(&mut self) -> Result<Conn> {
+    async fn connect_to(&mut self, mode: RecvCancelMode) -> Result<Conn> {
         let cfg = &self.config.advance.connection;
 
         loop {
             let r = tokio::select! {
                 r = self.rx.recv() => {
                     self.flag.check_guard(r)?;
+                    if mode.should_break(self.shutdown_mode()) {
+                        return Err(anyhow!("connect canceled"))
+                    }
                     continue;
                 }
 
@@ -599,9 +639,12 @@ impl<T: Delegate> Task<T> {
         Self::flush_xfer(conn, &mut xfer).await?;
 
         loop {
-            let r = self.recv_raw(conn).await.with_context(||"recv_raw failed")?;
+            let r = self.recv_raw(conn, RecvCancelMode::Connect).await.with_context(||"recv_raw failed")?;
             if let Some(raw) = r {
                 return Ok((raw, xfer))
+            }
+            if RecvCancelMode::Connect.should_break(self.shutdown_mode()) {
+                return Err(anyhow!("open canceled"))
             }
         }
     }
@@ -661,9 +704,9 @@ impl<T: Delegate> Task<T> {
 
 
     #[trace_result]
-    async fn recv_packet<'a>(&mut self, conn: &mut Conn, rraw: &'a mut RecvRaw) -> Result<Option<proto::PacketRef<'a>>> {
+    async fn recv_packet<'a>(&mut self, conn: &mut Conn, rraw: &'a mut RecvRaw, mode: RecvCancelMode) -> Result<Option<proto::PacketRef<'a>>> {
         loop {
-            let r = self.recv_raw(conn).await?;
+            let r = self.recv_raw(conn, mode).await?;
 
             let Some(raw) = r else {
                 return Ok(None)
@@ -680,11 +723,14 @@ impl<T: Delegate> Task<T> {
     }
 
     #[trace_result]
-    async fn recv_raw<'a>(&mut self, conn: &mut Conn) -> Result<Option<PacketRaw>> {
+    async fn recv_raw<'a>(&mut self, conn: &mut Conn, mode: RecvCancelMode) -> Result<Option<PacketRaw>> {
         loop {
             tokio::select! {
                 r = self.rx.recv() => {
                     self.flag.check_guard(r)?;
+                    if mode.should_break(self.shutdown_mode()) {
+                        return Ok(None)
+                    }
                     return Ok(None)
                 }
 
@@ -708,7 +754,7 @@ impl<T: Delegate> Task<T> {
     }
 
     #[trace_result]
-    async fn sleep(&mut self, d: Duration) -> Result<bool> {
+    async fn sleep(&mut self, d: Duration, mode: RecvCancelMode) -> Result<bool> {
 
         let deadline = Instant::now() + d;
 
@@ -716,6 +762,9 @@ impl<T: Delegate> Task<T> {
             tokio::select! {
                 r = self.rx.recv() => {
                     self.flag.check_guard(r)?;
+                    if mode.should_break(self.shutdown_mode()) {
+                        return Ok(false)
+                    }
                 }
 
                 _r = async_rt::sleep_until(deadline) => {
@@ -724,21 +773,57 @@ impl<T: Delegate> Task<T> {
             };
         }
     }
+
+    fn shutdown_mode(&self) -> ShutdownMode {
+        ShutdownMode::from_u8(self.shutdown_mode.load(Ordering::Relaxed))
+    }
 }
 
 
 #[derive(Debug, Clone, Default)]
 struct Flag {
-    got_closed: bool,
+    got_closed: Option<proto::Status>,
 }
 
 impl Flag {
     fn check_guard(&mut self, r: Option<()>) -> Result<()> {
         let r = r.with_context(||"got closed");
         if r.is_err() {
-            self.got_closed = true;
+            self.got_closed = Some(Default::default());
         }
         r
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ShutdownMode {
+    None = 0,
+    Graceful = 1,
+    Force = 2,
+}
+
+impl ShutdownMode {
+    fn from_u8(v: u8) -> Self {
+        match v {
+            1 => ShutdownMode::Graceful,
+            2 => ShutdownMode::Force,
+            _ => ShutdownMode::None,
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
+enum RecvCancelMode {
+    Connect,
+    Work,
+}
+
+impl RecvCancelMode {
+    fn should_break(self, mode: ShutdownMode) -> bool {
+        match self {
+            RecvCancelMode::Connect => mode != ShutdownMode::None,
+            RecvCancelMode::Work => mode == ShutdownMode::Force,
+        }
     }
 }
 

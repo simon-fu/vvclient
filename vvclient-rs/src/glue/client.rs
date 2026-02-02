@@ -75,16 +75,18 @@ impl SignalClient {
     // }
 
     #[trace_result]
-pub async fn leave_room_and_wait(&self, end: Option<bool>) {
+    pub async fn leave_room_and_wait(&self, end: Option<bool>, force: bool) {
         let (tx, rx) = oneshot::channel();
         if self.shared.is_closed() {
             debug!("leave_room_and_wait: already closed, skipping");
             return;
         }
+        self.worker.set_shutdown_mode(force);
         // TODO(ios-compat): ensure leave wait unblocks even if on_closed arrives before Op::Leave is processed.
         self.shared.set_leave_tx(tx);
         debug!("leave_room_and_wait: commit_op start");
         let r = self.commit_op(Op::Leave {end, tx: None});
+        let _ = self.worker.commit();
         match r {
             Ok(()) => {
                 debug!("leave_room_and_wait: commit_op ok, awaiting on_closed");
