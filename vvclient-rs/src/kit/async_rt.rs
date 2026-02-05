@@ -182,6 +182,7 @@ where
 
 /// 【全隔离版】
 /// 启动一个新的 OS 线程和临时的 Tokio Runtime 来执行任务。
+/// 调用时尽量不要持有锁。  
 /// 
 /// # 优点
 /// - **绝对安全**：由于环境隔离，永远不会发生死锁，哪怕在 `current_thread` 运行时中调用。
@@ -233,6 +234,7 @@ where
     }
 }
 
+/// 调用时尽量不要持有锁。  
 pub fn spawn_and_maybe_blocking_wait<F>(fut: F, timeout: Option<Duration>) -> Result<Option<F::Output>>
 where
     F: Future + Send + 'static,
@@ -259,6 +261,7 @@ where
 }
 
 /// 【Tokio 环境版】 
+/// 调用时尽量不要持有锁。  
 pub fn spawn_and_blocking_wait<F>(fut: F, timeout: Duration) -> Result<F::Output>
 where
     F: Future + Send + 'static,
