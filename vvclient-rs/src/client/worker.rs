@@ -231,12 +231,12 @@ impl<T: Delegate> Task<T> {
             }
 
             let Some(pkt_type) = packet.typ() else {
-                return Ok(())
+                continue;
             };
             
             match pkt_type {
                 proto::PacketType::Response => {
-                    let ack = packet.ack.with_context(||"no sn field in response")?;
+                    let ack = packet.ack.with_context(||"no ack field in response")?;
                     let mut typed = packet.parse_as_server_rsp()?;
                     if session.try_handle_heartbeat_response(ack, &mut typed)? {
                         continue;
@@ -469,6 +469,11 @@ impl<T: Delegate> Task<T> {
     #[trace_result]
     #[instrument(name="reconnect", skip(self, _session))]
     async fn phase_reconnect(&mut self, _session: &mut Session) -> Result<()> {
+        // NOTE:
+        // Heartbeat is request/response only (no ack packet for HB response).
+        // After reconnect succeeds, old pending heartbeat state must be cleared,
+        // otherwise client may keep waiting for a lost pre-disconnect HB response.
+        // reconnect_session should reset heartbeat state on the working Session.
         let (_conn, _raw) = timeout(
             self.config.advance.connection.max_timeout(), 
             self.reconnect_loop(),
@@ -583,7 +588,14 @@ impl<T: Delegate> Task<T> {
 
     #[trace_result]
     async fn reconnect_session<'a>(&mut self, _conn: &mut Conn) -> Result<PacketRaw> {
-        // TODO: 
+        // TODO:
+        // 1. send Reconnect request and validate response.
+        // 2. swap connection/session fields on success.
+        // 3. reset heartbeat state for the reconnected session:
+        //    - pending_hb_sn = None
+        //    - last_hb_at = now
+        //    - last_rx_at = now
+        //    so stale HB response from old connection will not block new heartbeat loop.
         async_rt::sleep(Duration::from_secs(99999)).await;
         Err(anyhow!("Not implement"))
     }
@@ -978,10 +990,11 @@ impl Session {
     }
 
     fn try_handle_heartbeat_response(&mut self, ack: i64, response: &mut proto::ServerResponse) -> Result<bool> {
-        let Some(pending) = self.pending_hb_sn else {
-            return Ok(false)
-        };
-        if pending != ack {
+        let is_hb = matches!(
+            response.typ.as_ref(),
+            Some(proto::response::ResponseType::HB(_))
+        );
+        if !is_hb {
             return Ok(false)
         }
 
@@ -990,13 +1003,14 @@ impl Session {
             return Err(anyhow!("heartbeat failed: code {}, reason {}", status.code, status.reason))
         }
 
-        match response.typ.as_ref() {
-            Some(proto::response::ResponseType::HB(_)) => {
+        if let Some(pending) = self.pending_hb_sn {
+            if ack >= pending {
                 self.pending_hb_sn = None;
-                Ok(true)
             }
-            _ => Ok(false),
         }
+
+        // HB response should always be consumed by heartbeat logic.
+        Ok(true)
     }
 }
 
