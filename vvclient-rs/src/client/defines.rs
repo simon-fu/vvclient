@@ -55,6 +55,15 @@ pub struct ConnectionConfig {
     /// 忽略服务器的证书  
     pub ignore_server_cert: bool,
 
+    /// 是否启用业务心跳
+    pub heartbeat_enable: Option<bool>,
+
+    /// 心跳发送间隔
+    pub heartbeat_interval: Option<Duration>,
+
+    /// 心跳超时阈值
+    pub heartbeat_timeout: Option<Duration>,
+
     // /// 禁止 nagle 算法
     // pub disable_nagle: bool,
 }
@@ -70,5 +79,17 @@ impl ConnectionConfig {
 
     pub fn retry_interval(&self) -> Duration {
         self.retry_interval.unwrap_or(Duration::from_secs(1))
+    }
+
+    pub fn heartbeat_enable(&self) -> bool {
+        self.heartbeat_enable.unwrap_or(true)
+    }
+
+    pub fn heartbeat_interval(&self) -> Duration {
+        self.heartbeat_interval.unwrap_or(Duration::from_secs(10))
+    }
+
+    pub fn heartbeat_timeout(&self) -> Duration {
+        self.heartbeat_timeout.unwrap_or(Duration::from_secs(30))
     }
 }

@@ -389,6 +389,8 @@ pub mod client_message {
 
         BEnd(super::BatchEndRequest),
 
+        HB(super::HeartbeatRequest),
+
         // Ack(super::PushAck),
     }
 }
@@ -511,6 +513,18 @@ pub struct BatchEndRequest {
 #[derive(serde::Serialize, serde::Deserialize, Clone, PartialEq, Debug)]
 #[serde(rename_all = "camelCase")]
 pub struct BatchEndResponse {
+    
+}
+
+#[derive(serde::Serialize, serde::Deserialize, Clone, PartialEq, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct HeartbeatRequest {
+    
+}
+
+#[derive(serde::Serialize, serde::Deserialize, Clone, PartialEq, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct HeartbeatResponse {
     
 }
 
@@ -682,6 +696,8 @@ pub mod response {
         Chat(super::ChatResponse),
 
         BEnd(super::BatchEndResponse),
+
+        HB(super::HeartbeatResponse),
     }
 }
 

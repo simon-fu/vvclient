@@ -23,6 +23,15 @@ pub struct SignalConfig {
     pub token: Option<String>,
 
     pub client_info: Option<ClientInfo>,
+
+    /// 心跳开关，默认 true
+    pub heartbeat_enable: Option<bool>,
+
+    /// 心跳间隔（毫秒）
+    pub heartbeat_interval_ms: Option<i64>,
+
+    /// 心跳超时（毫秒）
+    pub heartbeat_timeout_ms: Option<i64>,
 }
 
 impl Into<JoinConfig> for SignalConfig {
@@ -42,6 +51,13 @@ impl Into<JoinConfig> for SignalConfig {
             advance: JoinAdvanceArgs {
                 connection: ConnectionConfig {
                     ignore_server_cert: self.ignore_server_cert,
+                    heartbeat_enable: self.heartbeat_enable,
+                    heartbeat_interval: self.heartbeat_interval_ms.and_then(|v| {
+                        if v > 0 { Some(std::time::Duration::from_millis(v as u64)) } else { None }
+                    }),
+                    heartbeat_timeout: self.heartbeat_timeout_ms.and_then(|v| {
+                        if v > 0 { Some(std::time::Duration::from_millis(v as u64)) } else { None }
+                    }),
                     ..Default::default()
                 },
                 token: self.token.map(Into::into),

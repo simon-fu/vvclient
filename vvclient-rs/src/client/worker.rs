@@ -195,8 +195,23 @@ impl<T: Delegate> Task<T> {
 
         loop {
             self.try_handle_op(session).await.with_context(||"try_handle_msgs failed")?;
-            
-            let r = self.recv_packet(&mut session.conn, &mut rraw, RecvCancelMode::Work).await.with_context(||"recv_packet falied")?;
+            let hb_deadline = session.heartbeat_deadline(&self.config.advance.connection);
+
+            let r = if let Some(deadline) = hb_deadline {
+                tokio::select! {
+                    r = self.recv_packet(&mut session.conn, &mut rraw, RecvCancelMode::Work) => {
+                        r.with_context(||"recv_packet falied")?
+                    }
+                    _ = async_rt::sleep_until(deadline) => {
+                        self.handle_heartbeat_tick(session).await?;
+                        continue;
+                    }
+                }
+            } else {
+                self.recv_packet(&mut session.conn, &mut rraw, RecvCancelMode::Work)
+                    .await
+                    .with_context(||"recv_packet falied")?
+            };
 
             let Some(packet) = r else {
                 if RecvCancelMode::Work.should_break(self.shutdown_mode()) {
@@ -204,6 +219,8 @@ impl<T: Delegate> Task<T> {
                 }
                 continue;
             };
+
+            session.on_recv();
 
             if let Some(ack_sn) = packet.ack {
                 session.xfer.update_recv_ack(ack_sn);
@@ -219,8 +236,11 @@ impl<T: Delegate> Task<T> {
             
             match pkt_type {
                 proto::PacketType::Response => {
-                    let typed = packet.parse_as_server_rsp()?;
                     let ack = packet.ack.with_context(||"no sn field in response")?;
+                    let mut typed = packet.parse_as_server_rsp()?;
+                    if session.try_handle_heartbeat_response(ack, &mut typed)? {
+                        continue;
+                    }
                     self.listener.on_response(session, ack, typed).await?;
                     // self.handle_response(session, ack, typed).await?;
                 },
@@ -426,7 +446,7 @@ impl<T: Delegate> Task<T> {
 
         self.listener.on_process(session).await.with_context(||"on_process failed")?;
 
-        Self::flush_xfer(&mut session.conn, &mut session.xfer).await?;
+        let _ = Self::flush_xfer(&mut session.conn, &mut session.xfer).await?;
 
         Ok(())
     }
@@ -489,8 +509,14 @@ impl<T: Delegate> Task<T> {
             conn_id: rsp.conn_id,
             xfer,
             conn,
+            heartbeat_started: false,
+            last_rx_at: Instant::now(),
+            last_hb_at: Instant::now(),
+            pending_hb_sn: None,
             // close_status: Default::default(),
         };
+
+        session.start_heartbeat();
 
         info!("opened session [{}], conn_id [{}]", session.session_id, session.conn_id);
 
@@ -636,7 +662,7 @@ impl<T: Delegate> Task<T> {
 
         let mut xfer = Xfer::new();
         self.listener.on_opening(&mut xfer).await?;
-        Self::flush_xfer(conn, &mut xfer).await?;
+        let _ = Self::flush_xfer(conn, &mut xfer).await?;
 
         loop {
             let r = self.recv_raw(conn, RecvCancelMode::Connect).await.with_context(||"recv_raw failed")?;
@@ -777,6 +803,31 @@ impl<T: Delegate> Task<T> {
     fn shutdown_mode(&self) -> ShutdownMode {
         ShutdownMode::from_u8(self.shutdown_mode.load(Ordering::Relaxed))
     }
+
+    #[trace_result]
+    async fn handle_heartbeat_tick(&mut self, session: &mut Session) -> Result<()> {
+        let cfg = &self.config.advance.connection;
+
+        if !cfg.heartbeat_enable() {
+            return Ok(())
+        }
+
+        if session.heartbeat_timed_out(cfg.heartbeat_timeout()) {
+            return Err(anyhow!("heartbeat timeout"))
+        }
+
+        if session.heartbeat_due(cfg.heartbeat_interval()) {
+            if !session.has_pending_heartbeat() {
+                let body = proto::HeartbeatRequestSer {}.into_body();
+                let sn = session.xfer_mut().add_qos1_json(proto::PacketType::Request, &body, None)?;
+                session.set_pending_heartbeat(sn);
+                session.on_heartbeat_sent();
+                let _ = Self::flush_xfer(&mut session.conn, &mut session.xfer).await?;
+            }
+        }
+
+        Ok(())
+    }
 }
 
 
@@ -864,6 +915,10 @@ pub struct Session {
     conn_id: String,
     xfer: Xfer,
     conn: Conn,
+    heartbeat_started: bool,
+    last_rx_at: Instant,
+    last_hb_at: Instant,
+    pending_hb_sn: Option<i64>,
     // close_status: Option<proto::Status>,
 }
 
@@ -878,6 +933,70 @@ impl Session {
 
     pub fn xfer_mut(&mut self) -> &mut Xfer {
         &mut self.xfer
+    }
+
+    fn start_heartbeat(&mut self) {
+        let now = Instant::now();
+        self.heartbeat_started = true;
+        self.last_rx_at = now;
+        self.last_hb_at = now;
+        self.pending_hb_sn = None;
+    }
+
+    fn on_recv(&mut self) {
+        self.last_rx_at = Instant::now();
+    }
+
+    fn on_heartbeat_sent(&mut self) {
+        self.last_hb_at = Instant::now();
+    }
+
+    fn heartbeat_due(&self, interval: Duration) -> bool {
+        self.heartbeat_started && self.last_hb_at.elapsed() >= interval
+    }
+
+    fn heartbeat_timed_out(&self, timeout: Duration) -> bool {
+        self.heartbeat_started && self.last_rx_at.elapsed() >= timeout
+    }
+
+    fn heartbeat_deadline(&self, cfg: &super::defines::ConnectionConfig) -> Option<Instant> {
+        if !cfg.heartbeat_enable() {
+            return None
+        }
+        if !self.heartbeat_started {
+            return None
+        }
+        Some(self.last_hb_at + cfg.heartbeat_interval())
+    }
+
+    fn has_pending_heartbeat(&self) -> bool {
+        self.pending_hb_sn.is_some()
+    }
+
+    fn set_pending_heartbeat(&mut self, sn: i64) {
+        self.pending_hb_sn = Some(sn);
+    }
+
+    fn try_handle_heartbeat_response(&mut self, ack: i64, response: &mut proto::ServerResponse) -> Result<bool> {
+        let Some(pending) = self.pending_hb_sn else {
+            return Ok(false)
+        };
+        if pending != ack {
+            return Ok(false)
+        }
+
+        let status = response.status.take().unwrap_or_default();
+        if status.code != 0 {
+            return Err(anyhow!("heartbeat failed: code {}, reason {}", status.code, status.reason))
+        }
+
+        match response.typ.as_ref() {
+            Some(proto::response::ResponseType::HB(_)) => {
+                self.pending_hb_sn = None;
+                Ok(true)
+            }
+            _ => Ok(false),
+        }
     }
 }
 

@@ -444,6 +444,29 @@ pub enum BatchEndTypeSer<T> {
     BEnd(T),
 }
 
+#[derive(serde::Serialize, Clone, PartialEq, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct HeartbeatRequestSer {
+
+}
+
+impl HeartbeatRequestSer {
+    pub fn into_msg(self) -> ClientRequestSer<HeartbeatTypeSer<Self>> {
+        ClientRequestSer {
+            typ: HeartbeatTypeSer::HB(self)
+        }
+    }
+
+    pub fn into_body(self) -> JsonDisplay<ClientRequestSer<HeartbeatTypeSer<Self>>> {
+        JsonDisplay(self.into_msg())
+    }
+}
+
+#[derive(serde::Serialize, Clone, PartialEq, Debug)]
+pub enum HeartbeatTypeSer<T> {
+    HB(T),
+}
+
 
 #[derive(serde::Serialize, Clone, PartialEq, Debug)]
 pub struct CloseSessionRequestSer<'a> {
