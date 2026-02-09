@@ -20,6 +20,7 @@ use crate::{client::{ws_tung::{TungConnector, TungStream}, xfer::Xfer}, kit::{as
 
 use super::defines::*;
 
+const RECONNECT_MAGIC: i32 = 20250901;
 
 
 pub struct Worker {
@@ -66,6 +67,8 @@ impl Worker {
             rx,
             listener,
             shutdown_mode: shutdown_mode.clone(),
+            reconnect_try_seq: 0,
+            reconnect_last_success_seq: 0,
         };
 
         let span = match span {
@@ -121,6 +124,8 @@ struct Task<T: Delegate> {
     flag: Flag,
     listener: T,
     shutdown_mode: Arc<AtomicU8>,
+    reconnect_try_seq: i64,
+    reconnect_last_success_seq: i64,
 }
 
 impl<T: Delegate> Task<T> {
@@ -467,16 +472,16 @@ impl<T: Delegate> Task<T> {
 
 
     #[trace_result]
-    #[instrument(name="reconnect", skip(self, _session))]
-    async fn phase_reconnect(&mut self, _session: &mut Session) -> Result<()> {
+    #[instrument(name="reconnect", skip(self, session))]
+    async fn phase_reconnect(&mut self, session: &mut Session) -> Result<()> {
         // NOTE:
         // Heartbeat is request/response only (no ack packet for HB response).
         // After reconnect succeeds, old pending heartbeat state must be cleared,
         // otherwise client may keep waiting for a lost pre-disconnect HB response.
         // reconnect_session should reset heartbeat state on the working Session.
-        let (_conn, _raw) = timeout(
+        timeout(
             self.config.advance.connection.max_timeout(), 
-            self.reconnect_loop(),
+            self.reconnect_loop(session),
         )
         .await
         .map_err(|_e|anyhow!(
@@ -561,21 +566,26 @@ impl<T: Delegate> Task<T> {
     }
 
     #[trace_result]
-    async fn reconnect_loop<'a>(&mut self) -> Result<(Conn, PacketRaw)> {
+    async fn reconnect_loop(&mut self, session: &mut Session) -> Result<()> {
         loop {
 
             let mut conn = self.connect_loop(RecvCancelMode::Work).await?;
 
-            let r = self.reconnect_session(&mut conn).await;
+            let r = self.reconnect_session(&mut conn, session).await;
 
             match r {
-                Ok(raw) => return Ok((conn, raw)),
+                Ok(()) => return Ok(()),
                 Err(e) => {
                     if RecvCancelMode::Work.should_break(self.shutdown_mode()) {
                         return Err(e)
                     }
+                    if let Some(status) = e.downcast_ref::<proto::Status>() {
+                        if status.code != 0 {
+                            return Err(e)
+                        }
+                    }
                     warn!("{}", trace_fmt!("reconnect_session failed", e));
-                    debug!("will retry opening session in [{:?}]", self.config.advance.connection.retry_interval());
+                    debug!("will retry reconnecting session in [{:?}]", self.config.advance.connection.retry_interval());
                     if !self.sleep(self.config.advance.connection.retry_interval(), RecvCancelMode::Work).await? {
                         return Err(anyhow!("reconnect canceled"))
                     }
@@ -587,17 +597,67 @@ impl<T: Delegate> Task<T> {
     }
 
     #[trace_result]
-    async fn reconnect_session<'a>(&mut self, _conn: &mut Conn) -> Result<PacketRaw> {
-        // TODO:
-        // 1. send Reconnect request and validate response.
-        // 2. swap connection/session fields on success.
-        // 3. reset heartbeat state for the reconnected session:
-        //    - pending_hb_sn = None
-        //    - last_hb_at = now
-        //    - last_rx_at = now
-        //    so stale HB response from old connection will not block new heartbeat loop.
-        async_rt::sleep(Duration::from_secs(99999)).await;
-        Err(anyhow!("Not implement"))
+    async fn reconnect_session(&mut self, conn: &mut Conn, session: &mut Session) -> Result<()> {
+        self.reconnect_try_seq += 1;
+
+        let req = proto::ReconnectRequestSer {
+            session_id: &session.session_id,
+            try_seq: self.reconnect_try_seq,
+            last_success_seq: self.reconnect_last_success_seq,
+            magic: RECONNECT_MAGIC,
+        };
+
+        let packet = proto::PacketSer {
+            typ: Some(proto::PacketType::Request.as_num()),
+            sn: None,
+            body: Some(req.into_body()),
+            ack: None,
+        };
+
+        conn.send_packet_ser(&packet).await.with_context(||"send reconnect packet failed")?;
+
+        let mut rraw = RecvRaw::default();
+        loop {
+            let r = self.recv_packet(conn, &mut rraw, RecvCancelMode::Work)
+                .await
+                .with_context(||"recv reconnect response failed")?;
+
+            let Some(packet) = r else {
+                if RecvCancelMode::Work.should_break(self.shutdown_mode()) {
+                    return Err(anyhow!("reconnect canceled"))
+                }
+                continue;
+            };
+
+            let rsp = parse_reconnect_response_packet(&packet)
+                .with_context(||"parse_reconnect_response_packet failed")?;
+
+            if let Some(ack_sn) = packet.ack {
+                session.xfer.update_recv_ack(ack_sn);
+            }
+            if let Some(sn) = packet.sn() {
+                session.xfer.update_recv_sn(sn);
+            }
+
+            let old_conn_id = session.conn_id.clone();
+            std::mem::swap(&mut session.conn, conn);
+            session.conn_id = rsp.conn_id;
+            session.start_heartbeat();
+            self.reconnect_last_success_seq = self.reconnect_try_seq;
+
+            let _ = Self::flush_xfer(&mut session.conn, &mut session.xfer).await?;
+
+            info!(
+                "reconnected session [{}], conn_id [{}] -> [{}], try_seq [{}], last_success_seq [{}]",
+                session.session_id,
+                old_conn_id,
+                session.conn_id,
+                self.reconnect_try_seq,
+                self.reconnect_last_success_seq
+            );
+
+            return Ok(())
+        }
     }
 
     #[trace_result]
@@ -919,6 +979,29 @@ fn parse_open_response_packet(packet: &proto::PacketRef) -> Result<proto::OpenSe
         _ => {
             Err(anyhow!("unexpect response type"))
         }
+    }
+}
+
+#[trace_result]
+fn parse_reconnect_response_packet(packet: &proto::PacketRef) -> Result<proto::ReconnectResponse> {
+    if packet.typ() != Some(proto::PacketType::Response) {
+        return Err(anyhow!("invalid packet type {:?}", packet.typ()))
+    }
+
+    let body = packet.body.as_ref().with_context(||"empty body")?;
+
+    let mut server_rsp: proto::ServerResponse = serde_json::from_str(body).with_context(||"invalid json")?;
+
+    if let Some(status) = server_rsp.status.take() {
+        if status.code != 0 {
+            return Err(anyhow::Error::from(status))
+        }
+    }
+
+    let rsp_type = server_rsp.typ.with_context(||"invalid response type")?;
+    match rsp_type {
+        proto::response::ResponseType::Reconn(rsp) => Ok(rsp),
+        _ => Err(anyhow!("unexpect response type")),
     }
 }
 

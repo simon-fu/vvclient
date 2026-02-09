@@ -132,6 +132,40 @@ pub struct SdkInfoSer<'a> {
 }
 
 
+#[derive(serde::Serialize, Clone, PartialEq, Debug)]
+pub enum ReconnTypeSer<T> {
+    Reconn(T),
+}
+
+
+
+#[derive(serde::Serialize, Clone, PartialEq, Debug)]
+pub struct ReconnectRequestSer<'a> 
+{
+    pub session_id: &'a str,
+
+    /// 尝试重连的次数，从1开始，依次递增。
+    /// 比如 第一次重连是1，第二次是2，不管连接成功与否，每次尝试连接都递增
+    pub try_seq: i64,
+
+    /// 上一次重连成功的 try_seq 值，初始值为 0
+    pub last_success_seq: i64,
+
+    /// 标志， 固定为 20250901
+    pub magic: i32, 
+}
+
+impl<'a> ReconnectRequestSer<'a> {
+    fn into_msg(self) -> ClientRequestSer<ReconnTypeSer<Self>> {
+        ClientRequestSer {
+            typ: ReconnTypeSer::Reconn(self)
+        }
+    }
+
+    pub fn into_body(self) -> JsonDisplay<ClientRequestSer<ReconnTypeSer<Self>>> {
+        JsonDisplay(self.into_msg())
+    }
+}
 
 
 #[derive(serde::Serialize, Clone, PartialEq, Debug)]
