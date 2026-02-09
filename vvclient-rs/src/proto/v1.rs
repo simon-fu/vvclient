@@ -423,6 +423,9 @@ pub struct ReconnectRequest {
     // /// last ack seq
     // pub ack_seq: Option<i64>,
 
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub token: Option<String>,
+
     /// 尝试重连的次数，从1开始，依次递增。
     /// 比如 第一次重连是1，第二次是2，不管连接成功与否，每次尝试连接都递增
     pub try_seq: i64,
@@ -1334,5 +1337,4 @@ mod test {
     }
 
 }
-
 

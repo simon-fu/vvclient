@@ -144,6 +144,9 @@ pub struct ReconnectRequestSer<'a>
 {
     pub session_id: &'a str,
 
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub token: Option<&'a str>,
+
     /// 尝试重连的次数，从1开始，依次递增。
     /// 比如 第一次重连是1，第二次是2，不管连接成功与否，每次尝试连接都递增
     pub try_seq: i64,

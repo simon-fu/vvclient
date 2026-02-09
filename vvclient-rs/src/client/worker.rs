@@ -602,6 +602,7 @@ impl<T: Delegate> Task<T> {
 
         let req = proto::ReconnectRequestSer {
             session_id: &session.session_id,
+            token: self.config.advance.token.as_deref(),
             try_seq: self.reconnect_try_seq,
             last_success_seq: self.reconnect_last_success_seq,
             magic: RECONNECT_MAGIC,
