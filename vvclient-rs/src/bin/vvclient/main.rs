@@ -77,6 +77,9 @@ async fn run_client() -> Result<()> {
             ignore_server_cert: true,
             token: None,
             client_info: None,
+            heartbeat_enable: None,
+            heartbeat_interval_ms: None,
+            heartbeat_timeout_ms: None,
         }, 
         std::sync::Arc::new(ListenerImpl {tx}),
     )?;
@@ -236,4 +239,3 @@ impl vvclient::glue::client::Listener for ListenerImpl {
     }
 
 }
-

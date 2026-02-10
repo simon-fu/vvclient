@@ -1276,6 +1276,8 @@ pub fn stream_type_from(value: i32) -> Result<(StreamType, mediasoup::prelude::M
 
 #[cfg(test)]
 mod test {
+    use std::borrow::Cow;
+
     use crate::proto::{PacketRef, PacketType};
 
     #[test]
@@ -1300,7 +1302,11 @@ mod test {
         let obj1: Foo = serde_json::from_str(&json).unwrap();
         println!("{obj1:?}");
 
-        let obj2: FooRef = serde_json::from_str(&json).unwrap();
+        let err = serde_json::from_str::<FooRef>(&json).unwrap_err();
+        assert!(err.to_string().contains("expected a borrowed string"));
+
+        let json_plain = r#"{"sn":1,"typ":3,"body":"plain"}"#;
+        let obj2: FooRef = serde_json::from_str(&json_plain).unwrap();
         println!("{obj2:?}");
 
         #[derive(serde::Serialize, serde::Deserialize, Clone, PartialEq, Debug, Default)]
@@ -1336,5 +1342,17 @@ mod test {
         }
     }
 
-}
+    #[test]
+    fn test_packet_ref_body_handles_escaped_json_string() {
+        let json = r#"{"sn":1,"typ":3,"body":"{\"typ\":1}"}"#;
+        let packet: PacketRef = serde_json::from_str(json).unwrap();
+        assert_eq!(packet.typ, Some(PacketType::Request.as_num()));
+        assert_eq!(packet.sn, Some(1));
+        assert_eq!(packet.body.as_deref(), Some(r#"{"typ":1}"#));
 
+        // Escaped JSON string cannot always be borrowed directly.
+        // PacketRef uses Cow so it can safely own decoded content when needed.
+        assert!(matches!(packet.body, Some(Cow::Owned(_))));
+    }
+
+}
