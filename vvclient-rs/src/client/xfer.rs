@@ -157,6 +157,9 @@ impl Xfer {
         }
     }
 
+    /// Returns an iterator that yields at most one cumulative ACK packet.
+    /// ACK commit is two-step: it first yields the packet, then advances
+    /// `sent_ack_sn` on the next iteration so send failures do not mark ACK sent.
     pub fn ack_iter<'a>(&'a mut self) -> AckIter<'a> {
         AckIter {
             owner: self,
@@ -353,6 +356,4 @@ impl<'a> Iterator for AckIter<'a> {
         None
     }
 }
-
-
 
