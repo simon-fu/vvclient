@@ -256,7 +256,14 @@ impl<T: Delegate> Task<T> {
                 => {
                     let typed = packet.parse_as_server_push()?;
                     if let proto::ServerPushType::Closed(notice) = typed.typ {
-                        self.flag.got_closed = Some(notice.status.unwrap_or_default());
+                        let status = notice.status.unwrap_or_default();
+                        if let Err(e) = Self::flush_xfer_ack(&mut session.conn, &mut session.xfer).await {
+                            warn!("{}", trace_fmt!("send ack for closed push failed", e));
+                        }
+                        if let Err(e) = session.conn.send_close_frame().await {
+                            warn!("{}", trace_fmt!("send websocket close frame failed", e));
+                        }
+                        self.flag.got_closed = Some(status);
                         return Ok(())
                     }
                     self.listener.on_push(session, typed).await?;
@@ -467,6 +474,15 @@ impl<T: Delegate> Task<T> {
             conn.send_packet(packet).await?;
         }
 
+        Ok(())
+    }
+
+    #[trace_result]
+    async fn flush_xfer_ack(conn: &mut Conn, xfer: &mut Xfer) -> Result<()> {
+        for item in xfer.ack_iter() {
+            let packet = item?;
+            conn.send_packet(packet).await?;
+        }
         Ok(())
     }
 
@@ -1124,6 +1140,13 @@ impl Conn {
     pub async fn send_packet(&mut self, text: String) -> Result<()> {
         debug!("send raw [{}]", text);
         self.stream.send_text(text).await?;
+        Ok(())
+    }
+
+    #[trace_result]
+    pub async fn send_close_frame(&mut self) -> Result<()> {
+        debug!("send websocket close frame");
+        self.stream.send_close().await?;
         Ok(())
     }
 

@@ -99,6 +99,15 @@ impl TungStream {
         Ok(())
     }
 
+    pub async fn send_close(&mut self) -> Result<()> {
+        self.socket
+            .send(WsMessage::Close(None))
+            .await
+            .with_context(|| "send close frame failed")?;
+        self.is_closed = true;
+        Ok(())
+    }
+
     pub async fn wait_next_recv(&mut self)-> Result<()> {
         if self.recv_packet.is_some() {
             return Ok(())
@@ -166,4 +175,3 @@ impl TungStream {
 
 pub type WsStream = WebSocketStream<MaybeTlsStream<TcpStream>>;
 pub type Packet = Utf8Bytes;
-
