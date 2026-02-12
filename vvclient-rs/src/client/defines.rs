@@ -1,10 +1,6 @@
-
-
 use std::{collections::HashMap, time::Duration};
 
 use crate::{kit::astr::AStr, proto};
-
-
 
 #[derive(Debug, Clone)]
 pub struct JoinConfig {
@@ -19,7 +15,7 @@ pub struct JoinConfig {
 pub struct JoinAdvanceArgs {
     pub user_ext: Option<AStr>,
 
-    pub user_tree: Option<Vec<proto::UpdateTreeRequest>>, 
+    pub user_tree: Option<Vec<proto::UpdateTreeRequest>>,
 
     pub connection: ConnectionConfig,
 
@@ -63,7 +59,6 @@ pub struct ConnectionConfig {
 
     /// 心跳超时阈值
     pub heartbeat_timeout: Option<Duration>,
-
     // /// 禁止 nagle 算法
     // pub disable_nagle: bool,
 }

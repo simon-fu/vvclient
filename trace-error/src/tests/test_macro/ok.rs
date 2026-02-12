@@ -10,7 +10,7 @@ fn foo_ok11() -> Result<()> {
 
 #[trace_result]
 fn foo_ok12() -> Result<()> {
-    return Ok(())
+    return Ok(());
 }
 
 #[trace_result]
@@ -27,7 +27,7 @@ fn foo_ok21() -> Result<()> {
 
 #[trace_result]
 fn foo_ok22() -> Result<()> {
-    return Result::<_>::Ok(())
+    return Result::<_>::Ok(());
 }
 
 #[trace_result]
@@ -44,7 +44,7 @@ fn foo_ok31() -> Result<Result<()>> {
 
 #[trace_result]
 fn foo_ok32() -> Result<Result<()>> {
-    return Ok(Ok(()))
+    return Ok(Ok(()));
 }
 
 #[trace_result]
@@ -61,7 +61,7 @@ fn foo_ok41() -> Result<Result<()>> {
 
 #[trace_result]
 fn foo_ok42() -> Result<Result<()>> {
-    return Result::<_>::Ok(Ok(()))
+    return Result::<_>::Ok(Ok(()));
 }
 
 #[trace_result]
@@ -71,7 +71,7 @@ fn foo_ok43() -> Result<Result<()>> {
 
 #[trace_result]
 fn foo_ok44() -> Result<Result<()>> {
-    return Result::<_>::Ok(Ok(())).with_context(||"never failed");
+    return Result::<_>::Ok(Ok(())).with_context(|| "never failed");
 }
 
 // -----------------------------------------

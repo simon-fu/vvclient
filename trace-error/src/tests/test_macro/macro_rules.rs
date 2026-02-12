@@ -1,6 +1,5 @@
-
-use anyhow::Result;
 use crate::tests::trace_result;
+use anyhow::Result;
 // use crate::assert_contains;
 
 macro_rules! return_err {
@@ -20,7 +19,7 @@ macro_rules! return_err {
 #[trace_result]
 fn error1() -> Result<()> {
     let yes = false;
-  
+
     let opt = if yes {
         Some(())
     } else {
@@ -32,7 +31,6 @@ fn error1() -> Result<()> {
 
     Ok(())
 }
-
 
 #[test]
 fn test_macro_expr() {

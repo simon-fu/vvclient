@@ -123,8 +123,7 @@ macro_rules! define_error_code {
     };
 }
 
-
-define_error_code!(ErrorCode, 88, {    
+define_error_code!(ErrorCode, 88, {
     DupUser = (1601, "DupUser"),
     DupSession = (1602, "DupSession"),
     SessionClosed = (1603, "SessionClosed"),

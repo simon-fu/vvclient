@@ -1,7 +1,7 @@
 use anyhow::Result;
 use rustls::pki_types::CertificateDer;
 
-use super::certs::{pem_to_der, CertBytes};
+use super::certs::{CertBytes, pem_to_der};
 
 pub struct EmbedCert {
     pub key_bytes: &'static [u8],
@@ -14,7 +14,7 @@ impl EmbedCert {
         // 终端证书： openssl req -newkey rsa:2048 -new -nodes -x509 -days 3650 -keyout key.pem -out cert.pem -subj "/CN=localhost" -addext "basicConstraints=CA:FALSE" -addext "subjectAltName=DNS:localhost"
 
         let cert_bytes = include_bytes!("self_signed_certs/cert.pem");
-        let key_bytes =  include_bytes!("self_signed_certs/key.pem");
+        let key_bytes = include_bytes!("self_signed_certs/key.pem");
 
         Self {
             key_bytes,
@@ -36,6 +36,3 @@ impl EmbedCert {
         }
     }
 }
-
-
-

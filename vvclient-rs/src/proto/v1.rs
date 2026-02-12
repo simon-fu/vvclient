@@ -1,4 +1,3 @@
-
 use std::{borrow::Cow, collections::HashMap, fmt};
 
 use anyhow::{Context as _, Result, bail};
@@ -8,21 +7,20 @@ use crate::kit::astr::AStr;
 
 use super::mediasoup;
 
-
 #[derive(serde::Serialize, serde::Deserialize, Clone, PartialEq, Debug, Default)]
 #[serde(bound(deserialize = "'de: 'a"))]
 pub struct PacketRef<'a> {
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub typ: Option<i32>,  // see PacketType
+    pub typ: Option<i32>, // see PacketType
 
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub sn: Option<i64>,  // seq number
+    pub sn: Option<i64>, // seq number
 
     #[serde(skip_serializing_if = "Option::is_none")]
     pub body: Option<Cow<'a, str>>,
 
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub ack: Option<i64>,  // ack sn
+    pub ack: Option<i64>, // ack sn
 }
 
 impl<'a> PacketRef<'a> {
@@ -75,26 +73,28 @@ impl<'a> PacketRef<'a> {
         match self.sn {
             None => None,
             Some(0) => None,
-            Some(v) => Some(v)
+            Some(v) => Some(v),
         }
     }
 
     pub fn parse_as_client_req(&self) -> Result<ClientRequest> {
-
         let typ = self.typ();
 
         match typ {
             Some(PacketType::Request) => {}
-            _ => bail!("expect request but typ [{:?}]", self.typ)
+            _ => bail!("expect request but typ [{:?}]", self.typ),
         }
 
-        let body = self.body.as_ref().with_context(||format!("expect request body"))?;
-        let req : ClientRequest = serde_json::from_str(&body).with_context(||"invalid client req body")?;
+        let body = self
+            .body
+            .as_ref()
+            .with_context(|| format!("expect request body"))?;
+        let req: ClientRequest =
+            serde_json::from_str(&body).with_context(|| "invalid client req body")?;
         Ok(req)
     }
 
     pub fn parse_as_server_rsp(&self) -> Result<ServerResponse> {
-
         // let typ = self.typ();
 
         // match typ {
@@ -102,14 +102,22 @@ impl<'a> PacketRef<'a> {
         //     _ => return Err(anyhow!("expect response but typ [{:?}]", self.typ))
         // }
 
-        let body = self.body.as_ref().with_context(||format!("expect server response body"))?;
-        let typed : ServerResponse = serde_json::from_str(&body).with_context(||"invalid server response body")?;
+        let body = self
+            .body
+            .as_ref()
+            .with_context(|| format!("expect server response body"))?;
+        let typed: ServerResponse =
+            serde_json::from_str(&body).with_context(|| "invalid server response body")?;
         Ok(typed)
     }
 
     pub fn parse_as_server_push(&self) -> Result<ServerPush> {
-        let body = self.body.as_ref().with_context(||format!("expect server push body"))?;
-        let typed : ServerPush = serde_json::from_str(&body).with_context(||"invalid server push body")?;
+        let body = self
+            .body
+            .as_ref()
+            .with_context(|| format!("expect server push body"))?;
+        let typed: ServerPush =
+            serde_json::from_str(&body).with_context(|| "invalid server push body")?;
         Ok(typed)
     }
 
@@ -120,19 +128,18 @@ impl<'a> PacketRef<'a> {
             ack: self.ack,
         }
     }
-
 }
 
 #[derive(serde::Serialize, serde::Deserialize, Clone, PartialEq, Debug, Default)]
 pub struct PacketMeta {
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub typ: Option<i32>,  // see PacketType
+    pub typ: Option<i32>, // see PacketType
 
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub sn: Option<i64>,  // seq number
+    pub sn: Option<i64>, // seq number
 
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub ack: Option<i64>,  // ack sn
+    pub ack: Option<i64>, // ack sn
 }
 
 impl PacketMeta {
@@ -141,17 +148,14 @@ impl PacketMeta {
     }
 }
 
-
-
-
-#[derive( Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, FromRepr)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, FromRepr)]
 #[repr(i32)]
 pub enum PacketType {
-    Request = 3,    // 请求
-    Response = 4,   // 响应
-    Push0 = 5,  // 不需要回 ack
-    Push1 = 6,  // 不需要立即回 ack
-    Push2 = 7,  // 尽可能快回 ack
+    Request = 3,  // 请求
+    Response = 4, // 响应
+    Push0 = 5,    // 不需要回 ack
+    Push1 = 6,    // 不需要立即回 ack
+    Push2 = 7,    // 尽可能快回 ack
 }
 
 impl PacketType {
@@ -164,9 +168,7 @@ impl PacketType {
     }
 }
 
-
-
-#[derive( Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy)]
 pub enum BodyType {
     UserInit = 1,
     UserState = 2,
@@ -183,10 +185,9 @@ impl BodyType {
     }
 }
 
-
 #[derive(serde::Serialize, serde::Deserialize, Clone, PartialEq, Debug, Default)]
 pub struct Status {
-    pub code :i32,
+    pub code: i32,
     pub reason: String,
 }
 
@@ -207,7 +208,7 @@ impl Status {
     pub fn with_context<C, F, T>(self, f: F) -> Result<T, anyhow::Error>
     where
         C: fmt::Display + Send + Sync + 'static,
-        F: FnOnce() -> C 
+        F: FnOnce() -> C,
     {
         Err(anyhow::Error::from(self)).with_context(f)
     }
@@ -217,32 +218,25 @@ impl<'a> From<&'a anyhow::Error> for Status {
     fn from(value: &'a anyhow::Error) -> Self {
         match value.downcast_ref::<Self>() {
             Some(v) => v.clone(),
-            None => {
-                Self {
-                    code: Self::INTERNAL_ERROR_CODE,
-                    reason: format!("internal error: [{value}]"),
-                }
+            None => Self {
+                code: Self::INTERNAL_ERROR_CODE,
+                reason: format!("internal error: [{value}]"),
             },
         }
     }
 }
-
 
 impl From<anyhow::Error> for Status {
     fn from(value: anyhow::Error) -> Self {
         match value.downcast::<Self>() {
             Ok(v) => v,
-            Err(e) => {
-                Self {
-                    code: Self::INTERNAL_ERROR_CODE,
-                    reason: format!("internal error: [{e}]"),
-                }
+            Err(e) => Self {
+                code: Self::INTERNAL_ERROR_CODE,
+                reason: format!("internal error: [{e}]"),
             },
         }
     }
 }
-
-
 
 pub type ClientRequest = ClientMessage;
 
@@ -257,35 +251,51 @@ pub struct ServerPushRef<'a> {
 
 impl<'a> ServerPushRef<'a> {
     pub fn closed(v: ClosedNoticeRef<'a>) -> Self {
-        Self { typ: ServerPushTypeRef::Closed(v) }
+        Self {
+            typ: ServerPushTypeRef::Closed(v),
+        }
     }
 
     pub fn chat(v: ChatNoticeRef<'a>) -> Self {
-        Self { typ: ServerPushTypeRef::Chat(v) }
+        Self {
+            typ: ServerPushTypeRef::Chat(v),
+        }
     }
 
     pub fn user_init(v: IdRef<'a>) -> Self {
-        Self { typ: ServerPushTypeRef::UInit(v) }
+        Self {
+            typ: ServerPushTypeRef::UInit(v),
+        }
     }
 
     pub fn user_ready(v: IdRef<'a>) -> Self {
-        Self { typ: ServerPushTypeRef::UReady(v) }
+        Self {
+            typ: ServerPushTypeRef::UReady(v),
+        }
     }
 
     pub fn user_full(v: &'a UserState) -> Self {
-        Self { typ: ServerPushTypeRef::UFull(v) }
+        Self {
+            typ: ServerPushTypeRef::UFull(v),
+        }
     }
 
     pub fn user_tree(v: TreeStateRef<'a>) -> Self {
-        Self { typ: ServerPushTypeRef::UTree(v) }
+        Self {
+            typ: ServerPushTypeRef::UTree(v),
+        }
     }
 
     pub fn room_tree(v: TreeStateRef<'a>) -> Self {
-        Self { typ: ServerPushTypeRef::RTree(v) }
+        Self {
+            typ: ServerPushTypeRef::RTree(v),
+        }
     }
 
     pub fn room_ready(v: IdRef<'a>) -> Self {
-        Self { typ: ServerPushTypeRef::RReady(v) }
+        Self {
+            typ: ServerPushTypeRef::RReady(v),
+        }
     }
 }
 
@@ -298,12 +308,12 @@ pub enum ServerPushTypeRef<'a> {
     /// User Ready
     UReady(IdRef<'a>),
     /// User Full
-    UFull(&'a UserState), 
+    UFull(&'a UserState),
     /// User Tree
     UTree(TreeStateRef<'a>),
-    /// Room Tree 
+    /// Room Tree
     RTree(TreeStateRef<'a>),
-    /// Room Ready 
+    /// Room Ready
     RReady(IdRef<'a>),
 }
 
@@ -331,21 +341,18 @@ pub enum ServerPushType {
     /// User Ready
     UReady(Id),
     /// User Full
-    UFull(UserState), 
+    UFull(UserState),
     /// User Tree
     UTree(TreeState),
-    /// Room Tree 
+    /// Room Tree
     RTree(TreeState),
-    /// Room Ready 
+    /// Room Ready
     RReady(Id),
 }
 
-
 #[derive(serde::Serialize, serde::Deserialize, Clone, PartialEq, Debug)]
 pub struct ClientMessage {
-
     // pub msg_id: i64,
-
     pub typ: ::core::option::Option<client_message::MsgType>,
 }
 
@@ -354,7 +361,6 @@ pub mod client_message {
 
     #[derive(serde::Serialize, serde::Deserialize, Clone, PartialEq, Debug)]
     pub enum MsgType {
-
         Open(super::OpenSessionRequest),
 
         Reconn(super::ReconnectRequest),
@@ -390,7 +396,6 @@ pub mod client_message {
         BEnd(super::BatchEndRequest),
 
         HB(super::HeartbeatRequest),
-
         // Ack(super::PushAck),
     }
 }
@@ -405,13 +410,12 @@ pub struct OpenSessionRequest {
     pub user_ext: Option<String>,
 
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub user_tree: Option<Vec<UpdateTreeRequest>>,    
+    pub user_tree: Option<Vec<UpdateTreeRequest>>,
 
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub batch: Option<bool>, 
-    
+    pub batch: Option<bool>,
     // #[serde(skip_serializing_if = "Option::is_none")]
-    // pub create_x_requests: Option<Vec<CreateWebrtcTransportRequest>>,   
+    // pub create_x_requests: Option<Vec<CreateWebrtcTransportRequest>>,
 }
 
 #[derive(serde::Serialize, serde::Deserialize, Clone, PartialEq, Debug)]
@@ -422,7 +426,6 @@ pub struct ReconnectRequest {
 
     // /// last ack seq
     // pub ack_seq: Option<i64>,
-
     #[serde(skip_serializing_if = "Option::is_none")]
     pub token: Option<String>,
 
@@ -439,17 +442,14 @@ pub struct ReconnectRequest {
 
 #[derive(serde::Serialize, serde::Deserialize, Clone, PartialEq, Debug)]
 pub struct RoomCursor {
-    
     pub room_id: String,
 
     pub seq: i64,
 }
 
-
 #[derive(serde::Serialize, serde::Deserialize, Clone, PartialEq, Debug)]
 #[serde(rename_all = "camelCase")]
 pub struct MuteRequest {
-    
     pub room_id: String,
 
     pub producer_id: Option<String>,
@@ -462,13 +462,11 @@ pub struct MuteRequest {
 #[derive(serde::Serialize, serde::Deserialize, Clone, PartialEq, Debug)]
 #[serde(rename_all = "camelCase")]
 pub struct LayerRequest {
-    
     pub room_id: String,
 
     pub consumer_id: String,
 
     pub preferred_layers: ::core::option::Option<PreferredLayers>,
-
     // pub s_layer: u8,
 
     // pub t_layer: Option<u8>,
@@ -476,9 +474,7 @@ pub struct LayerRequest {
 
 #[derive(serde::Serialize, serde::Deserialize, Clone, PartialEq, Debug)]
 #[serde(rename_all = "camelCase")]
-pub struct EndRequest {
-    
-}
+pub struct EndRequest {}
 
 #[derive(serde::Serialize, serde::Deserialize, Clone, PartialEq, Debug)]
 #[serde(rename_all = "camelCase")]
@@ -509,43 +505,31 @@ pub struct ChatRequest {
 
 #[derive(serde::Serialize, serde::Deserialize, Clone, PartialEq, Debug)]
 #[serde(rename_all = "camelCase")]
-pub struct BatchEndRequest {
-    
-}
+pub struct BatchEndRequest {}
 
 #[derive(serde::Serialize, serde::Deserialize, Clone, PartialEq, Debug)]
 #[serde(rename_all = "camelCase")]
-pub struct BatchEndResponse {
-    
-}
+pub struct BatchEndResponse {}
 
 #[derive(serde::Serialize, serde::Deserialize, Clone, PartialEq, Debug)]
 #[serde(rename_all = "camelCase")]
-pub struct HeartbeatRequest {
-    
-}
+pub struct HeartbeatRequest {}
 
 #[derive(serde::Serialize, serde::Deserialize, Clone, PartialEq, Debug)]
 #[serde(rename_all = "camelCase")]
-pub struct HeartbeatResponse {
-    
-}
-
+pub struct HeartbeatResponse {}
 
 #[derive(serde::Serialize, serde::Deserialize, Clone, PartialEq, Debug)]
 pub struct OpenSessionResponse {
     pub session_id: String,
     /// 连接 Id
     pub conn_id: ::prost::alloc::string::String,
-
     // #[serde(skip_serializing_if = "Option::is_none")]
-    // pub create_x_responses: Option<Vec<CreateWebrtcTransportResponse>>, 
+    // pub create_x_responses: Option<Vec<CreateWebrtcTransportResponse>>,
 }
 
 #[derive(serde::Serialize, serde::Deserialize, Clone, PartialEq, Debug)]
-pub struct CloseSessionResponse {
-
-}
+pub struct CloseSessionResponse {}
 
 #[derive(serde::Serialize, serde::Deserialize, Clone, PartialEq, Debug)]
 pub struct ReconnectResponse {
@@ -560,7 +544,6 @@ pub struct CloseSessionRequest {
     pub end: Option<bool>,
 }
 
-
 // #[derive(serde::Serialize)]
 // // #[derive(::dump_derive::Dump)]
 // #[allow(clippy::derive_partial_eq_without_eq)]
@@ -569,7 +552,6 @@ pub struct CloseSessionRequest {
 // pub struct ServerMessageRef {
 //     pub msg_type: ::core::option::Option<server_message::MsgType>,
 // }
-
 
 // impl<'a> Into<String> for ServerMessageRef<'a> {
 //     fn into(self) -> String {
@@ -639,14 +621,11 @@ pub struct CloseSessionRequest {
 //     }
 // }
 
-
-
 #[derive(serde::Serialize, Clone, PartialEq, Debug)]
 pub struct ResponseRef<'a> {
     pub status: ::core::option::Option<&'a Status>,
 
     // pub msg_id: i64,
-
     pub typ: ::core::option::Option<response::ResponseType>,
 }
 
@@ -655,7 +634,6 @@ pub struct Response {
     pub status: ::core::option::Option<Status>,
 
     // pub msg_id: i64,
-
     pub typ: ::core::option::Option<response::ResponseType>,
 }
 
@@ -665,7 +643,6 @@ pub mod response {
 
     #[derive(serde::Serialize, serde::Deserialize, Clone, PartialEq, Debug)]
     pub enum ResponseType {
-        
         Open(super::OpenSessionResponse),
 
         Reconn(super::ReconnectResponse),
@@ -718,26 +695,22 @@ pub struct ClosedNotice {
 
 #[derive(serde::Serialize, serde::Deserialize, Clone, PartialEq, Debug)]
 pub struct RoomNotice {
-
     pub room_id: String,
 
     pub seq: i64,
 
     pub json: String,
-
     // #[prost(oneof = "room_notice::NoticeType", tags = "3, 4, 5, 6, 7, 8, 9")]
     // pub notice_type: ::core::option::Option<room_notice::NoticeType>,
 }
 
 #[derive(serde::Serialize, serde::Deserialize, Clone, PartialEq, Debug)]
 pub struct ChNoticeRef<'a> {
-
     pub id: &'a str,
 
     pub seq: i64,
 
     pub body: &'a str,
-
     // #[prost(oneof = "room_notice::NoticeType", tags = "3, 4, 5, 6, 7, 8, 9")]
     // pub notice_type: ::core::option::Option<room_notice::NoticeType>,
 }
@@ -756,7 +729,6 @@ pub struct ChNoticeRef<'a> {
 //     pub body: &'a str,
 // }
 
-
 #[derive(serde::Serialize, serde::Deserialize, Clone, PartialEq, Debug)]
 pub struct PushAck {
     pub seq: i64,
@@ -764,7 +736,6 @@ pub struct PushAck {
 
 #[derive(serde::Serialize, Clone, PartialEq, Debug)]
 pub struct ChatNoticeRef<'a> {
-
     pub from: &'a str,
 
     pub to: &'a str,
@@ -774,7 +745,6 @@ pub struct ChatNoticeRef<'a> {
 
 #[derive(serde::Deserialize, Clone, PartialEq, Debug)]
 pub struct ChatNotice {
-
     pub from: String,
 
     pub to: String,
@@ -785,7 +755,7 @@ pub struct ChatNotice {
 #[derive(serde::Serialize, Clone, PartialEq, Debug)]
 pub struct TreeStateRef<'a> {
     pub path: &'a str,
-    
+
     #[serde(skip_serializing_if = "Option::is_none")]
     pub value: Option<&'a str>,
 
@@ -799,7 +769,7 @@ pub struct TreeStateRef<'a> {
 #[derive(serde::Deserialize, Clone, PartialEq, Debug)]
 pub struct TreeState {
     pub path: String,
-    
+
     #[serde(skip_serializing_if = "Option::is_none")]
     pub value: Option<String>,
 
@@ -811,53 +781,50 @@ pub struct TreeState {
 }
 
 // pub mod room_notice {
-    // #[derive(serde::Deserialize, serde::Serialize)]
-    // // #[derive(::dump_derive::Dump)]
-    // #[allow(clippy::derive_partial_eq_without_eq)]
-    // #[derive(Clone, PartialEq)]
-    // #[derive(Debug)]
-    // pub enum NoticeType {
-    //     User(super::UserState),
+// #[derive(serde::Deserialize, serde::Serialize)]
+// // #[derive(::dump_derive::Dump)]
+// #[allow(clippy::derive_partial_eq_without_eq)]
+// #[derive(Clone, PartialEq)]
+// #[derive(Debug)]
+// pub enum NoticeType {
+//     User(super::UserState),
 
-    // }
+// }
 
-    // #[derive(serde::Serialize)]
-    // pub enum NoticeTypeRef<'a> {
-    //     User(&'a super::UserState),
-    //     /// User Tree
-    //     UTree(TreeStateRef<'a>),
-    //     /// Room Tree
-    //     RTree(TreeStateRef<'a>),
-    //     // Chat(ChatMsgRef<'a>),
-    // }
+// #[derive(serde::Serialize)]
+// pub enum NoticeTypeRef<'a> {
+//     User(&'a super::UserState),
+//     /// User Tree
+//     UTree(TreeStateRef<'a>),
+//     /// Room Tree
+//     RTree(TreeStateRef<'a>),
+//     // Chat(ChatMsgRef<'a>),
+// }
 
+// #[derive(serde::Serialize)]
+// pub struct ChatMsgRef<'a> {
+//     pub text: &'a str,
 
+//     #[serde(skip_serializing_if = "Option::is_none")]
+//     pub from: Option<&'a str>,
 
-    // #[derive(serde::Serialize)]
-    // pub struct ChatMsgRef<'a> {
-    //     pub text: &'a str,
-
-    //     #[serde(skip_serializing_if = "Option::is_none")]
-    //     pub from: Option<&'a str>,
-
-    //     #[serde(skip_serializing_if = "Option::is_none")]
-    //     pub to: Option<&'a str>,
-    // }
+//     #[serde(skip_serializing_if = "Option::is_none")]
+//     pub to: Option<&'a str>,
+// }
 // }
 
 #[derive(serde::Serialize, serde::Deserialize, Clone, PartialEq, Debug)]
 pub struct UserState {
-
     pub id: String, // user id
 
     pub online: bool,
-    
+
     pub streams: HashMap<String, Stream>,
 
     #[serde(skip_serializing_if = "Option::is_none")]
     pub ext: Option<String>,
 
-    pub inst_id: String,  // instance id
+    pub inst_id: String, // instance id
 }
 
 #[derive(serde::Serialize, serde::Deserialize, Clone, PartialEq, Debug)]
@@ -865,7 +832,6 @@ pub struct Stream {
     pub seq: i64,
 
     // pub kind: i32,
-
     pub stype: i32,
 
     pub producer_id: String,
@@ -877,7 +843,6 @@ pub struct Stream {
 #[derive(serde::Serialize, serde::Deserialize, Clone, PartialEq, Debug)]
 #[serde(rename_all = "camelCase")]
 pub struct CreateWebrtcTransportRequest {
-
     /// Room Id
     pub room_id: ::prost::alloc::string::String,
 
@@ -895,7 +860,6 @@ pub struct CreateWebrtcTransportRequest {
 #[derive(serde::Serialize, serde::Deserialize, Clone, PartialEq, Debug)]
 #[serde(rename_all = "camelCase")]
 pub struct CreateWebrtcTransportResponse {
-
     /// Transport Id
     pub xid: ::prost::alloc::string::String,
 
@@ -907,9 +871,7 @@ pub struct CreateWebrtcTransportResponse {
 
     /// Server Dtls Parameters
     pub dtls: ::core::option::Option<mediasoup::prelude::DtlsParameters>,
-
 }
-
 
 /// 传输通道方向
 #[derive(serde::Deserialize, serde::Serialize)]
@@ -926,7 +888,7 @@ impl Direction {
     pub fn value(&self) -> i32 {
         *self as i32
     }
-    
+
     /// String value of the enum field names used in the ProtoBuf definition.
     ///
     /// The values are not transformed in any way and thus are considered stable
@@ -946,7 +908,6 @@ impl Direction {
         }
     }
 }
-
 
 /// 媒体类型
 #[derive(serde::Deserialize, serde::Serialize)]
@@ -984,13 +945,11 @@ impl MediaKind {
     }
 }
 
-
 /// 连接 WebRtcTransport 请求参数
 #[derive(serde::Deserialize, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 #[allow(clippy::derive_partial_eq_without_eq)]
-#[derive(Clone, PartialEq)]
-#[derive(Debug)]
+#[derive(Clone, PartialEq, Debug)]
 pub struct ConnectWebrtcTransportRequest {
     /// Transport Id
     pub xid: ::prost::alloc::string::String,
@@ -999,19 +958,18 @@ pub struct ConnectWebrtcTransportRequest {
     pub dtls: ::core::option::Option<mediasoup::prelude::DtlsParameters>,
 }
 
-
 /// 发布媒体流请求参数
 #[derive(serde::Serialize, serde::Deserialize, Clone, PartialEq, Debug)]
 #[serde(rename_all = "camelCase")]
 pub struct PublishRequest {
     /// Room Id
     pub room_id: ::prost::alloc::string::String,
-    
+
     /// 发送通道 Transport Id
     pub xid: ::prost::alloc::string::String,
-    
+
     pub stream_id: ::prost::alloc::string::String,
-    
+
     /// 媒体类型, 见 MediaKind
     // pub kind: i32,
 
@@ -1025,7 +983,6 @@ pub struct PublishRequest {
     pub audio_type: i32,
 
     pub muted: ::core::option::Option<bool>,
-
 }
 
 /// 取消发布媒体流请求参数
@@ -1040,7 +997,6 @@ pub struct UnPublishRequest {
 
     /// 媒体流 Id （和生产者 Id 二选一）
     pub stream_id: Option<String>,
-
 }
 
 /// 订阅媒体流请求参数
@@ -1061,7 +1017,6 @@ pub struct SubscribeRequest {
 
     /// 空间层/时间层
     pub preferred_layers: ::core::option::Option<PreferredLayers>,
-
 }
 
 /// 取消订阅媒体流请求参数
@@ -1123,23 +1078,18 @@ pub struct PreferredLayers {
     pub temporal_layer: i32,
 }
 
-
 /// 连接 WebRtcTransport 响应参数
 #[derive(serde::Serialize, serde::Deserialize, Clone, PartialEq, Debug)]
 #[serde(rename_all = "camelCase")]
-pub struct ConnectWebrtcTransportResponse {
-
-}
+pub struct ConnectWebrtcTransportResponse {}
 
 /// 发布媒体流响应参数
 #[derive(serde::Serialize, serde::Deserialize, Clone, PartialEq, Debug)]
 #[serde(rename_all = "camelCase")]
 pub struct PublishResponse {
-    
     /// 生产者 Id
     pub producer_id: ::prost::alloc::string::String,
 }
-
 
 /// 取消发布媒体流响应参数
 #[derive(serde::Serialize, serde::Deserialize, Clone, PartialEq, Debug)]
@@ -1163,21 +1113,15 @@ pub struct SubscribeResponse {
 /// 取消订阅媒体流响应参数
 #[derive(serde::Serialize, serde::Deserialize, Clone, PartialEq, Debug)]
 #[serde(rename_all = "camelCase")]
-pub struct UnSubscribeResponse {
-
-}
+pub struct UnSubscribeResponse {}
 
 #[derive(serde::Serialize, serde::Deserialize, Clone, PartialEq, Debug)]
 #[serde(rename_all = "camelCase")]
-pub struct MuteResponse {
-
-}
+pub struct MuteResponse {}
 
 #[derive(serde::Serialize, serde::Deserialize, Clone, PartialEq, Debug)]
 #[serde(rename_all = "camelCase")]
-pub struct LayerResponse {
-
-}
+pub struct LayerResponse {}
 
 #[derive(serde::Serialize, serde::Deserialize, Clone, PartialEq, Debug)]
 #[serde(rename_all = "camelCase")]
@@ -1187,41 +1131,35 @@ pub struct EndResponse {
 
 #[derive(serde::Serialize, serde::Deserialize, Clone, PartialEq, Debug)]
 #[serde(rename_all = "camelCase")]
-pub struct UpdateExtResponse {
-    
-}
+pub struct UpdateExtResponse {}
 
 #[derive(serde::Serialize, serde::Deserialize, Clone, PartialEq, Debug)]
 #[serde(rename_all = "camelCase")]
-pub struct UpdateTreeResponse {
-    
-}
+pub struct UpdateTreeResponse {}
 
 #[derive(serde::Serialize, serde::Deserialize, Clone, PartialEq, Debug)]
 #[serde(rename_all = "camelCase")]
-pub struct ChatResponse {
-    
-}
+pub struct ChatResponse {}
 
-#[derive( Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, FromRepr)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, FromRepr)]
 #[repr(i32)]
 pub enum StreamType {
     Camera = 1,
     Mic = 2,
-    Screen = 3, 
+    Screen = 3,
 }
 
 impl StreamType {
-    pub fn from_value(value: i32) -> Result<Self>{
-        Self::from_repr(value).with_context(||format!("invalid StreamType [{value}]"))
+    pub fn from_value(value: i32) -> Result<Self> {
+        Self::from_repr(value).with_context(|| format!("invalid StreamType [{value}]"))
     }
 
     pub fn value(&self) -> i32 {
         *self as i32
     }
 
-    pub fn value_str(value: i32) -> Result<&'static str>{
-        Self::from_value(value).map(|x|x.as_str())
+    pub fn value_str(value: i32) -> Result<&'static str> {
+        Self::from_value(value).map(|x| x.as_str())
     }
 
     pub fn as_str(&self) -> &'static str {
@@ -1232,8 +1170,6 @@ impl StreamType {
         }
     }
 }
-
-
 
 // impl TryFrom<i32> for StreamType {
 //     type Error = anyhow::Error;
@@ -1253,10 +1189,9 @@ pub fn stream_type_from(value: i32) -> Result<(StreamType, mediasoup::prelude::M
         1 => Ok((StreamType::Camera, mediasoup::prelude::MediaKind::Video)),
         2 => Ok((StreamType::Mic, mediasoup::prelude::MediaKind::Audio)),
         3 => Ok((StreamType::Screen, mediasoup::prelude::MediaKind::Video)),
-        _ => bail!("unknown stream type [{}]", value)
+        _ => bail!("unknown stream type [{}]", value),
     }
 }
-
 
 // #[derive(serde::Serialize)]
 // struct MyStruct<T: fmt::Display> {
@@ -1272,7 +1207,6 @@ pub fn stream_type_from(value: i32) -> Result<(StreamType, mediasoup::prelude::M
 // {
 //     serializer.collect_str(value)
 // }
-
 
 #[cfg(test)]
 mod test {
@@ -1313,32 +1247,32 @@ mod test {
         #[serde(bound(deserialize = "'de: 'a"))]
         pub struct FooRef<'a> {
             #[serde(skip_serializing_if = "Option::is_none")]
-            pub typ: Option<i32>,  // see PacketType
+            pub typ: Option<i32>, // see PacketType
 
             #[serde(skip_serializing_if = "Option::is_none")]
-            pub sn: Option<i64>,  // seq number
+            pub sn: Option<i64>, // seq number
 
             #[serde(skip_serializing_if = "Option::is_none")]
             pub body: Option<&'a str>,
 
             #[serde(skip_serializing_if = "Option::is_none")]
-            pub ack: Option<i64>,  // ack sn
+            pub ack: Option<i64>, // ack sn
         }
 
         #[derive(serde::Serialize, serde::Deserialize, Clone, PartialEq, Debug, Default)]
         // #[serde(bound(deserialize = "'de: 'a"))]
         struct Foo {
             #[serde(skip_serializing_if = "Option::is_none")]
-            pub typ: Option<i32>,  // see PacketType
+            pub typ: Option<i32>, // see PacketType
 
             #[serde(skip_serializing_if = "Option::is_none")]
-            pub sn: Option<i64>,  // seq number
+            pub sn: Option<i64>, // seq number
 
             #[serde(skip_serializing_if = "Option::is_none")]
             pub body: Option<String>,
 
             #[serde(skip_serializing_if = "Option::is_none")]
-            pub ack: Option<i64>,  // ack sn
+            pub ack: Option<i64>, // ack sn
         }
     }
 
@@ -1354,5 +1288,4 @@ mod test {
         // PacketRef uses Cow so it can safely own decoded content when needed.
         assert!(matches!(packet.body, Some(Cow::Owned(_))));
     }
-
 }

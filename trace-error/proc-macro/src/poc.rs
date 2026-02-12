@@ -1,18 +1,17 @@
-
-
 use proc_macro::TokenStream;
 use quote::{quote, quote_spanned};
 use syn::{
-    Block, Expr, ExprReturn, ExprTry, Ident, ItemFn, Stmt, fold::{Fold, fold_block}, parse_macro_input, spanned::Spanned
+    Block, Expr, ExprReturn, ExprTry, Ident, ItemFn, Stmt,
+    fold::{Fold, fold_block},
+    parse_macro_input,
+    spanned::Spanned,
 };
 
-
 macro_rules! dbgd {
-    ($($arg:tt)* ) => (
+    ($($arg:tt)* ) => {
         // eprintln!($($arg)*)
-    );
+    };
 }
-
 
 struct TryRewriter {
     fn_name: Ident,
@@ -34,7 +33,11 @@ impl Fold for TryRewriter {
         let span = folded_inner.question_token.span();
         let inner_expr = *folded_inner.expr;
 
-        dbgd!("fold_expr_try: fn_name [{}], inner_expr [{}]", fn_name, quote!{#inner_expr});
+        dbgd!(
+            "fold_expr_try: fn_name [{}], inner_expr [{}]",
+            fn_name,
+            quote! {#inner_expr}
+        );
 
         let new_tokens = quote_spanned! { span =>
             ( #inner_expr ).with_context(|| concat!(
@@ -47,16 +50,20 @@ impl Fold for TryRewriter {
             attrs: folded_inner.attrs,
             expr: Box::new(new_expr),
             question_token: folded_inner.question_token,
-        }       
+        }
     }
 
     fn fold_expr_return(&mut self, i: ExprReturn) -> ExprReturn {
-        
-        dbgd!("fold_expr_return: inner_expr [{}]", quote!{#i});
+        dbgd!("fold_expr_return: inner_expr [{}]", quote! {#i});
 
         let folded = syn::fold::fold_expr_return(self, i);
 
-        if let ExprReturn { attrs, return_token, expr: Some(ret_expr) } = folded {
+        if let ExprReturn {
+            attrs,
+            return_token,
+            expr: Some(ret_expr),
+        } = folded
+        {
             if Self::is_ok_constructor(&ret_expr) {
                 ExprReturn {
                     attrs,
@@ -73,7 +80,8 @@ impl Fold for TryRewriter {
                         stringify!(#fn_name), "()"
                     ))
                 };
-                let new_ret_expr: Expr = syn::parse2(new_tokens).expect("parse generated expr for return");
+                let new_ret_expr: Expr =
+                    syn::parse2(new_tokens).expect("parse generated expr for return");
 
                 ExprReturn {
                     attrs,
@@ -81,17 +89,12 @@ impl Fold for TryRewriter {
                     expr: Some(Box::new(new_ret_expr)),
                 }
             }
-
-
         } else {
             folded
         }
-
     }
-    
 
     fn fold_block(&mut self, b: Block) -> Block {
-
         let mut new_block = fold_block(self, b);
 
         if let Some(last) = new_block.stmts.pop() {
@@ -101,9 +104,13 @@ impl Fold for TryRewriter {
                     new_block.stmts.push(last);
                 }
                 Stmt::Expr(expr, None) => {
-
-                    let new_expr = try_attach_expr(expr.clone(), &self.fn_name, ||expr.span()).unwrap();
-                    dbgd!("fold_block: expr [{}], new_expr [{}]", quote!{#expr}, quote! {#new_expr});
+                    let new_expr =
+                        try_attach_expr(expr.clone(), &self.fn_name, || expr.span()).unwrap();
+                    dbgd!(
+                        "fold_block: expr [{}], new_expr [{}]",
+                        quote! {#expr},
+                        quote! {#new_expr}
+                    );
                     new_block.stmts.push(Stmt::Expr(new_expr, None));
 
                     // if Self::is_ok_constructor(&expr) {
@@ -139,20 +146,18 @@ impl Fold for TryRewriter {
 }
 
 fn try_attach_expr<F>(expr: Expr, fn_name: &Ident, func: F) -> syn::Result<Expr>
-where 
-    F: FnOnce() -> proc_macro2::Span
+where
+    F: FnOnce() -> proc_macro2::Span,
 {
     match &expr {
-        Expr::Macro(_v) => {
-            return Ok(expr)
-        },
+        Expr::Macro(_v) => return Ok(expr),
         _ => {}
     }
 
     if is_ok_constructor(&expr) {
-        return Ok(expr)
+        return Ok(expr);
     }
-    
+
     attach_expr(&expr, fn_name, func())
 }
 
@@ -174,16 +179,14 @@ fn is_ok_constructor(expr: &Expr) -> bool {
         if let Expr::Path(path_expr) = &*call.func {
             if let Some(seg) = path_expr.path.segments.last() {
                 let ident = seg.ident.to_string();
-                return ident == "Ok" // || ident == "Err";
+                return ident == "Ok"; // || ident == "Err";
             }
         }
     }
     false
 }
 
-
 pub fn trace_error(_attr: TokenStream, item: TokenStream) -> TokenStream {
-
     let mut input = parse_macro_input!(item as ItemFn);
     // dbgd!("input = [{}]", quote! {#input});
 
@@ -208,5 +211,3 @@ pub fn trace_error(_attr: TokenStream, item: TokenStream) -> TokenStream {
 
     TokenStream::from(quote! { #input })
 }
-
-

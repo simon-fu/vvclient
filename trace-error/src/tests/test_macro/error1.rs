@@ -1,7 +1,6 @@
-use anyhow::{Result, Error};
-use crate::tests::trace_result;
 use crate::assert_contains;
-
+use crate::tests::trace_result;
+use anyhow::{Error, Result};
 
 const ERROR1: &'static str = "at src/tests/test_macro/error1.rs:10:5, error1()";
 
@@ -14,7 +13,7 @@ const ERROR2: &'static str = "at src/tests/test_macro/error1.rs:17:5, error2()";
 
 #[trace_result]
 fn error2() -> Result<()> {
-    return Err(Error::msg(ERROR_MSG))
+    return Err(Error::msg(ERROR_MSG));
 }
 
 const ERROR3: &'static str = "at src/tests/test_macro/error1.rs:24:5, error3()";
@@ -28,22 +27,20 @@ const ERROR4: &'static str = "at src/tests/test_macro/error1.rs:31:5, error4()";
 
 #[trace_result]
 fn error4() -> Result<()> {
-    return Err(Error::msg(ERROR_MSG))  ;
+    return Err(Error::msg(ERROR_MSG));
 }
 
 const ERROR5: &'static str = "at src/tests/test_macro/error1.rs:38:5, error5()";
 
 #[trace_result]
 fn error5() -> Result<()> {
-    return Err(Error::msg(ERROR_MSG)).with_context(||"context in error");
+    return Err(Error::msg(ERROR_MSG)).with_context(|| "context in error");
 }
-
 
 // 以上行数不要修改
 // ====================================
 
 const ERROR_MSG: &'static str = "it-is-error-message";
-
 
 #[test]
 fn test_error1() {

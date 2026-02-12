@@ -1,6 +1,4 @@
-
 pub use arc_str::AStr;
-
 
 // #[cfg(debug_assertions)]
 // pub type AStr = String ;
@@ -41,7 +39,6 @@ mod arc_str {
             fmt::Display::fmt(self.as_str(), f)
         }
     }
-
 
     impl Deref for AStr {
         type Target = str;
@@ -89,9 +86,7 @@ mod arc_str {
         }
     }
 
-    impl Eq for AStr {
-
-    }
+    impl Eq for AStr {}
 
     impl PartialEq for AStr {
         fn eq(&self, other: &Self) -> bool {
@@ -138,7 +133,8 @@ mod arc_str {
     impl serde::Serialize for AStr {
         fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
         where
-            S: serde::Serializer {
+            S: serde::Serializer,
+        {
             serializer.serialize_str(self.as_str())
         }
     }
@@ -152,6 +148,4 @@ mod arc_str {
             Ok(s.into())
         }
     }
-
 }
-

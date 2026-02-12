@@ -1,12 +1,10 @@
 //! Scalability mode.
 
-
-
 // use std::cell::OnceCell;
 use std::sync::OnceLock as OnceCell;
 // use once_cell::sync::OnceCell;
 use regex::Regex;
-use serde::{de, Deserialize, Deserializer, Serialize, Serializer};
+use serde::{Deserialize, Deserializer, Serialize, Serializer, de};
 use std::fmt;
 use std::num::NonZeroU8;
 use std::str::FromStr;

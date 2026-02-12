@@ -1,10 +1,16 @@
+use std::{
+    future::Future,
+    sync::OnceLock,
+    thread,
+    time::{Duration, Instant},
+};
 
-use std::{future::Future, sync::OnceLock, thread, time::{Duration, Instant}};
-
-use anyhow::{Context as _, Result, bail, anyhow};
-use tokio::{runtime::{Builder, Handle, Runtime, RuntimeFlavor}, task::{self, JoinHandle}};
+use anyhow::{Context as _, Result, anyhow, bail};
 use std::sync::mpsc as sync_mpsc;
-
+use tokio::{
+    runtime::{Builder, Handle, Runtime, RuntimeFlavor},
+    task::{self, JoinHandle},
+};
 
 pub struct AsyncRT {
     runtime: Runtime,
@@ -15,7 +21,6 @@ pub struct AsyncRT {
 //     // task: Option<JoinHandle<()>>,
 //     guard_tx: Option<oneshot::Sender<()>>,
 // }
-
 
 static INST: OnceLock<AsyncRT> = OnceLock::new();
 
@@ -29,7 +34,7 @@ fn get_inst() -> &'static AsyncRT {
 pub fn maybe_init() -> Result<bool> {
     if INST.get().is_some() {
         Ok(false)
-    } else{
+    } else {
         init()?;
         Ok(true)
     }
@@ -45,9 +50,7 @@ where
     F: Future + Send + 'static,
     F::Output: Send + 'static,
 {
-    let output = do_init()?
-        .runtime
-        .block_on(fut);
+    let output = do_init()?.runtime.block_on(fut);
     Ok(output)
 }
 
@@ -64,17 +67,16 @@ fn do_init() -> Result<&'static AsyncRT> {
 
     // 2. 至少2个线程，避免 spawn_and_blocking_wait 出错。
     let worker_threads = core::cmp::max(core_count, 2);
-    
 
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .worker_threads(worker_threads)
         .enable_all()
         .build()
-        .with_context(||"init tokio runtime failed!")?;
+        .with_context(|| "init tokio runtime failed!")?;
 
     // let (init_tx, init_rx) = oneshot::channel();
     // let (guard_tx, guard_rx) = oneshot::channel();
-    
+
     // let task = runtime.spawn(async move {
     //     if let Err(_e) = init_rx.await {
     //         return;
@@ -117,7 +119,7 @@ fn do_init() -> Result<&'static AsyncRT> {
 
 //     let (init_tx, init_rx) = oneshot::channel();
 //     let (guard_tx, guard_rx) = oneshot::channel();
-    
+
 //     let task = runtime.spawn(async move {
 //         if let Err(_e) = init_rx.await {
 //             return;
@@ -173,21 +175,20 @@ where
 pub fn spawn_with_span<T>(span: tracing::Span, fut: T) -> tokio::task::JoinHandle<T::Output>
 where
     T: std::future::Future + Send + 'static,
-    T::Output: Send ,
+    T::Output: Send,
 {
     spawn(tracing::Instrument::instrument(fut, span))
     // tokio::spawn(tracing::Instrument::instrument(fut, span))
 }
 
-
 /// 【全隔离版】
 /// 启动一个新的 OS 线程和临时的 Tokio Runtime 来执行任务。
 /// 调用时尽量不要持有锁。  
-/// 
+///
 /// # 优点
 /// - **绝对安全**：由于环境隔离，永远不会发生死锁，哪怕在 `current_thread` 运行时中调用。
 /// - **通用**：不依赖当前上下文是否存在 Runtime。
-/// 
+///
 /// # 缺点
 /// - **开销**：每次调用都有创建线程和 Runtime 的成本。
 pub fn spawn_thread_and_blocking_wait<F>(fut: F, timeout: Option<Duration>) -> Result<F::Output>
@@ -195,7 +196,6 @@ where
     F: Future + Send + 'static,
     F::Output: Send + 'static,
 {
-
     // 使用 std channel 进行同步线程间的通信
     let (tx, rx) = sync_mpsc::channel();
 
@@ -218,49 +218,50 @@ where
 
     // 4. 阻塞等待结果
     match timeout {
-        Some(duration) => {
-            rx.recv_timeout(duration).map_err(|e| match e {
-                sync_mpsc::RecvTimeoutError::Timeout => {
-                    anyhow!("Operation timed out after {:?} (task continues in background)", duration)
-                }
-                sync_mpsc::RecvTimeoutError::Disconnected => {
-                    anyhow!("Background thread panicked or runtime failed")
-                }
-            })
-        }
-        None => {
-            rx.recv().map_err(|_| anyhow!("Background thread panicked"))
-        }
+        Some(duration) => rx.recv_timeout(duration).map_err(|e| match e {
+            sync_mpsc::RecvTimeoutError::Timeout => {
+                anyhow!(
+                    "Operation timed out after {:?} (task continues in background)",
+                    duration
+                )
+            }
+            sync_mpsc::RecvTimeoutError::Disconnected => {
+                anyhow!("Background thread panicked or runtime failed")
+            }
+        }),
+        None => rx.recv().map_err(|_| anyhow!("Background thread panicked")),
     }
 }
 
 /// 调用时尽量不要持有锁。  
-pub fn spawn_and_maybe_blocking_wait<F>(fut: F, timeout: Option<Duration>) -> Result<Option<F::Output>>
+pub fn spawn_and_maybe_blocking_wait<F>(
+    fut: F,
+    timeout: Option<Duration>,
+) -> Result<Option<F::Output>>
 where
     F: Future + Send + 'static,
     F::Output: Send + 'static,
 {
-    
     match timeout {
         None => {
             // === 场景 1: 不等待 (Fire and Forget) ===
 
             spawn(async move {
                 // 只需要执行，不需要管结果
-                let _r = fut.await; 
+                let _r = fut.await;
             });
             return Ok(None);
-        },
+        }
 
         Some(timeout) => {
             // === 场景 2: 需要等待 (Blocking Wait) ===
 
             Ok(Some(spawn_and_blocking_wait(fut, timeout)?))
-        },
+        }
     }
 }
 
-/// 【Tokio 环境版】 
+/// 【Tokio 环境版】
 /// 调用时尽量不要持有锁。  
 pub fn spawn_and_blocking_wait<F>(fut: F, timeout: Duration) -> Result<F::Output>
 where
@@ -300,7 +301,6 @@ where
         }
     };
 
-
     // 智能判断上下文：
     // 1. 如果当前线程是 Tokio 异步工作线程 -> 必须用 block_in_place 让出 CPU。
     // 2. 如果当前线程是普通线程 (main/std::thread) -> 直接阻塞即可。
@@ -313,7 +313,6 @@ where
         wait_logic()
     }
 }
-
 
 #[inline]
 pub async fn sleep(duration: Duration) {

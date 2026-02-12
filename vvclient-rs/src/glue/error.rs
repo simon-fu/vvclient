@@ -1,9 +1,6 @@
-
 // https://github.com/mozilla/uniffi-rs/blob/main/docs/manual/src/types/errors.md
 
-
-#[derive(uniffi::Object)]
-#[derive(Debug, thiserror::Error)]
+#[derive(uniffi::Object, Debug, thiserror::Error)]
 #[error("{e:?}")] // default message is from anyhow.
 pub struct Error {
     e: anyhow::Error,
@@ -35,13 +32,12 @@ impl From<anyhow::Error> for Error {
 impl From<ForeignError> for Error {
     fn from(value: ForeignError) -> Self {
         Self {
-            e: anyhow::Error::msg(value.to_string()) 
+            e: anyhow::Error::msg(value.to_string()),
         }
     }
 }
 
-#[derive(uniffi::Error)]
-#[derive(Debug, thiserror::Error)]
+#[derive(uniffi::Error, Debug, thiserror::Error)]
 pub enum ForeignError {
     #[error("Busy")]
     Busy,

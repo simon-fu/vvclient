@@ -1,7 +1,6 @@
-
 use serde::de::{MapAccess, Visitor};
 use serde::ser::SerializeStruct;
-use serde::{de, Deserialize, Deserializer, Serialize, Serializer};
+use serde::{Deserialize, Deserializer, Serialize, Serializer, de};
 use std::any::Any;
 use std::borrow::Cow;
 use std::fmt;
@@ -322,7 +321,7 @@ impl Default for DtlsRole {
 impl DtlsRole {
     pub fn as_sdp(&self) -> &'static str {
         match self {
-            DtlsRole::Client => "active", 
+            DtlsRole::Client => "active",
             DtlsRole::Server => "passive",
             DtlsRole::Auto => "actpass",
         }
@@ -334,10 +333,10 @@ impl core::str::FromStr for DtlsRole {
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         Ok(match s {
-            "active"  => DtlsRole::Client,
+            "active" => DtlsRole::Client,
             "passive" => DtlsRole::Server,
             "actpass" => DtlsRole::Auto,
-            _ => return Err(core::fmt::Error)
+            _ => return Err(core::fmt::Error),
         })
     }
 }
@@ -985,6 +984,3 @@ pub struct SrTraceInfo {
     /// Sender octet count
     pub octet_count: u32,
 }
-
-
-

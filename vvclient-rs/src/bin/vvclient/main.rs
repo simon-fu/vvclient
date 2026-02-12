@@ -1,6 +1,5 @@
 // #![cfg(not(target_os = "android"))]
 
-
 use anyhow::Result;
 use tokio::{select, sync::mpsc};
 use trace_error::anyhow::trace_result;
@@ -12,8 +11,8 @@ use vvclient::glue::error::ForeignResult;
 
 #[trace_result]
 fn main() -> Result<()> {
-    
-    rustls::crypto::ring::default_provider().install_default()
+    rustls::crypto::ring::default_provider()
+        .install_default()
         .map_err(|e| anyhow::anyhow!("failed to install default crypto [{e:?}]"))?;
 
     let _guard = vvclient::init_log!(
@@ -27,13 +26,10 @@ fn main() -> Result<()> {
         Some(true)
     )?;
 
-
-    async_rt::maybe_init()
-        .with_context(||"init async runtime failed")?;
-    
+    async_rt::maybe_init().with_context(|| "init async runtime failed")?;
 
     // vvclient::glue::open("ws://127.0.0.1/ws")?;
-    
+
     let (tx, rx) = tokio::sync::oneshot::channel();
     async_rt::spawn(async move {
         let r = run_client().await;
@@ -42,13 +38,12 @@ fn main() -> Result<()> {
             Ok(_v) => {
                 // let _r = tokio::signal::ctrl_c().await;
                 // client.into_finish().await;
-            },
+            }
             Err(e) => {
                 log::error!("{}", trace_fmt!("run_client failed", e));
-            },
+            }
         }
-        
-        
+
         let _r = tx.send(());
     });
 
@@ -70,7 +65,7 @@ async fn run_client() -> Result<()> {
     let user_id = String::from("user01");
 
     let client = vvclient::glue::client::make_signal_client(
-        url.into(), 
+        url.into(),
         SignalConfig {
             user_id: user_id.clone(),
             room_id: room_id.clone(),
@@ -80,14 +75,14 @@ async fn run_client() -> Result<()> {
             heartbeat_enable: None,
             heartbeat_interval_ms: None,
             heartbeat_timeout_ms: None,
-        }, 
-        std::sync::Arc::new(ListenerImpl {tx}),
+        },
+        std::sync::Arc::new(ListenerImpl { tx }),
     )?;
 
     // let request = vvclient::glue::defines::CreateXRequest {
-    //         room_id: room_id.clone(), 
-    //         dir: 0, 
-    //         kind: 0, 
+    //         room_id: room_id.clone(),
+    //         dir: 0,
+    //         kind: 0,
     //         dtls: None,
     //     };
 
@@ -96,17 +91,16 @@ async fn run_client() -> Result<()> {
     // client.create_x(request, std::sync::Arc::new(()))?;
 
     // client.create_x(
-    //     request, 
+    //     request,
     //     std::sync::Arc::new(vvclient::glue::defines::ResponseFn(|response: vvclient::glue::defines::CreateXResponse| {
     //         log::debug!("create_transport response: {:?}", response.xid);
     //         Ok(())
-    //     })), 
+    //     })),
     //     std::sync::Arc::new(vvclient::glue::defines::FailFn(|code, reason| {
     //         log::debug!("create_transport failed: {:?}", (&code, &reason));
     //         Ok(())
     //     })),
     // )?;
-
 
     select! {
         r = tokio::signal::ctrl_c() => {
@@ -126,8 +120,6 @@ async fn run_client() -> Result<()> {
     Ok(())
 }
 
-
-
 // struct TypesImpl;
 
 // impl Types for TypesImpl {
@@ -135,7 +127,6 @@ async fn run_client() -> Result<()> {
 
 //     type ResponseHandler = ();
 // }
-
 
 struct ListenerImpl {
     tx: mpsc::Sender<()>,
@@ -154,10 +145,7 @@ struct ListenerImpl {
 //     }
 // }
 
-
-
 impl vvclient::glue::client::Listener for ListenerImpl {
-
     #[tracing::instrument(skip(self))]
     fn on_opened(&self, args: OnOpenedArgs) -> ForeignResult<()> {
         log::debug!("");
@@ -176,66 +164,64 @@ impl vvclient::glue::client::Listener for ListenerImpl {
         log::debug!("");
         Ok(())
     }
-        
+
     #[tracing::instrument(skip(self))]
-    fn on_room_chat(&self, args: OnRoomChatArgs) -> ForeignResult<()>  {
+    fn on_room_chat(&self, args: OnRoomChatArgs) -> ForeignResult<()> {
         log::debug!("");
         Ok(())
     }
-    
+
     #[tracing::instrument(skip(self))]
-    fn on_user_chat(&self, args: OnUserChatArgs) -> ForeignResult<()>  {
+    fn on_user_chat(&self, args: OnUserChatArgs) -> ForeignResult<()> {
         log::debug!("");
         Ok(())
     }
-    
 
     #[tracing::instrument(skip(self))]
     fn on_user_joined(&self, args: OnUserJoinedArgs) -> ForeignResult<()> {
         log::debug!("");
         Ok(())
     }
-    
+
     #[tracing::instrument(skip(self))]
-    fn on_user_leaved(&self, args: OnUserLeavedArgs) -> ForeignResult<()>  {
-        log::debug!("");
-        Ok(())
-    }
-    
-    #[tracing::instrument(skip(self))]
-    fn on_add_stream(&self, args: OnAddStreamArgs) -> ForeignResult<()>  {
-        log::debug!("");
-        Ok(())
-    }
-    
-    #[tracing::instrument(skip(self))]
-    fn on_update_stream(&self, args: OnUpdateStreamArgs) -> ForeignResult<()>  {
-        log::debug!("");
-        Ok(())
-    }
-    
-    #[tracing::instrument(skip(self))]
-    fn on_remove_stream(&self, args: OnRemoveStreamArgs) -> ForeignResult<()>  {
-        log::debug!("");
-        Ok(())
-    }
-    
-    #[tracing::instrument(skip(self))]
-    fn on_update_user_tree(&self, args: OnUpdateUserTreeArgs) -> ForeignResult<()>  {
-        log::debug!("");
-        Ok(())
-    }
-    
-    #[tracing::instrument(skip(self))]
-    fn on_update_room_tree(&self, args: OnUpdateRoomTreeArgs) -> ForeignResult<()>  {
-        log::debug!("");
-        Ok(())
-    }
-    
-    #[tracing::instrument(skip(self))]
-    fn on_room_ready(&self) -> ForeignResult<()>  {
+    fn on_user_leaved(&self, args: OnUserLeavedArgs) -> ForeignResult<()> {
         log::debug!("");
         Ok(())
     }
 
+    #[tracing::instrument(skip(self))]
+    fn on_add_stream(&self, args: OnAddStreamArgs) -> ForeignResult<()> {
+        log::debug!("");
+        Ok(())
+    }
+
+    #[tracing::instrument(skip(self))]
+    fn on_update_stream(&self, args: OnUpdateStreamArgs) -> ForeignResult<()> {
+        log::debug!("");
+        Ok(())
+    }
+
+    #[tracing::instrument(skip(self))]
+    fn on_remove_stream(&self, args: OnRemoveStreamArgs) -> ForeignResult<()> {
+        log::debug!("");
+        Ok(())
+    }
+
+    #[tracing::instrument(skip(self))]
+    fn on_update_user_tree(&self, args: OnUpdateUserTreeArgs) -> ForeignResult<()> {
+        log::debug!("");
+        Ok(())
+    }
+
+    #[tracing::instrument(skip(self))]
+    fn on_update_room_tree(&self, args: OnUpdateRoomTreeArgs) -> ForeignResult<()> {
+        log::debug!("");
+        Ok(())
+    }
+
+    #[tracing::instrument(skip(self))]
+    fn on_room_ready(&self) -> ForeignResult<()> {
+        log::debug!("");
+        Ok(())
+    }
 }

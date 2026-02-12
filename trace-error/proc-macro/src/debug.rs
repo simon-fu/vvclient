@@ -1,5 +1,3 @@
-
-
 use quote::quote;
 use syn::{Block, ExprReturn, ExprTry, ItemFn, fold::Fold};
 
@@ -13,12 +11,12 @@ pub(crate) fn print_fn(input: &ItemFn) {
     dbgd!("==============");
     {
         let ident = &input.sig.ident;
-        dbgd!("input.sig.ident = {}", quote!{ #ident });
+        dbgd!("input.sig.ident = {}", quote! { #ident });
     }
 
     {
         let block = &input.block;
-        dbgd!("input.block = {}", quote!{ #block });
+        dbgd!("input.block = {}", quote! { #block });
     }
 
     {
@@ -32,20 +30,20 @@ pub(crate) fn print_fn(input: &ItemFn) {
                 syn::Stmt::Macro(_stmt_macro) => format!("Macro"),
             };
 
-            dbgd!("  [{index}][{typ}] = {}", quote!{ #stmt });
+            dbgd!("  [{index}][{typ}] = {}", quote! { #stmt });
         }
     }
 
     dbgd!("");
     FoldPrinter::default().fold_block(*input.block.clone());
-    
+
     dbgd!("");
 }
 
 pub(crate) fn traverse_fn(input: &ItemFn) {
     dbgd!("==============");
     FoldPrinter::default().fold_block(*input.block.clone());
-    
+
     dbgd!("");
 }
 
@@ -64,18 +62,17 @@ impl FoldPrinter {
 impl syn::fold::Fold for FoldPrinter {
     // override fold_expr_try to catch `expr?`
     fn fold_expr_try(&mut self, input: ExprTry) -> ExprTry {
-        
         dbgd!("");
         let num = self.next_num();
 
         dbgd!("fold_expr_try [{num}]: input  {}", quote! {#input});
-        
+
         // 递归折叠子节点
         let folded = syn::fold::fold_expr_try(self, input);
 
         // dbgd!("fold_expr_try [{num}]: output  {}", quote! {#folded});
 
-        folded     
+        folded
     }
 
     fn fold_expr_return(&mut self, input: ExprReturn) -> ExprReturn {
@@ -90,7 +87,6 @@ impl syn::fold::Fold for FoldPrinter {
 
         folded
     }
-    
 
     fn fold_block(&mut self, input: Block) -> Block {
         dbgd!("");

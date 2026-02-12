@@ -1,4 +1,3 @@
-
 mod scalability_modes;
 
 mod data_structures;
@@ -13,5 +12,4 @@ pub mod prelude {
     pub use super::scalability_modes::*;
 
     pub use super::rtp_parameters::*;
-    
 }

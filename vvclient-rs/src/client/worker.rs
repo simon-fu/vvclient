@@ -1,5 +1,4 @@
-
-use anyhow::{anyhow, Context, Result};
+use anyhow::{Context, Result, anyhow};
 use log::{debug, error, info, warn};
 
 use core::future::Future;
@@ -12,16 +11,22 @@ use tracing::{Span, instrument};
 
 use trace_error::anyhow::trace_result;
 
-use std::time::{Duration, Instant};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU8, Ordering};
+use std::time::{Duration, Instant};
 
-use crate::{client::{ws_tung::{TungConnector, TungStream}, xfer::Xfer}, kit::{astr::AStr, async_rt}, proto::{self}};
+use crate::{
+    client::{
+        ws_tung::{TungConnector, TungStream},
+        xfer::Xfer,
+    },
+    kit::{astr::AStr, async_rt},
+    proto::{self},
+};
 
 use super::defines::*;
 
 const RECONNECT_MAGIC: i32 = 20250901;
-
 
 pub struct Worker {
     task_handle: JoinHandle<()>,
@@ -30,28 +35,29 @@ pub struct Worker {
 }
 
 impl Worker {
-
     #[trace_result]
-    pub fn try_new<S, T>(url: S, span: Option<Span>, config: JoinConfig, listener: T) -> Result<Self> 
-    where 
+    pub fn try_new<S, T>(
+        url: S,
+        span: Option<Span>,
+        config: JoinConfig,
+        listener: T,
+    ) -> Result<Self>
+    where
         S: Into<String>,
         T: Delegate,
     {
-        
         let url = url.into();
 
-        let uri: Uri = url.parse()
+        let uri: Uri = url
+            .parse()
             .with_context(|| format!("invalid url [{url}]"))?;
 
-        let scheme = uri.scheme_str()
-            .with_context(||"url has no scheme")?;
+        let scheme = uri.scheme_str().with_context(|| "url has no scheme")?;
 
-        if false
-            || scheme.eq_ignore_ascii_case("ws") 
-            || scheme.eq_ignore_ascii_case("wss") {
+        if false || scheme.eq_ignore_ascii_case("ws") || scheme.eq_ignore_ascii_case("wss") {
             // SchemeClient::Ws
         } else {
-            return Err(anyhow!("unsupported scheme [{scheme}]"))
+            return Err(anyhow!("unsupported scheme [{scheme}]"));
         };
 
         let url: AStr = url.into();
@@ -76,7 +82,7 @@ impl Worker {
             None => tracing::span!(parent: None, tracing::Level::ERROR, "client"),
         };
 
-        let task_handle = async_rt::spawn_with_span(span,  async move {
+        let task_handle = async_rt::spawn_with_span(span, async move {
             task.run().await;
         });
 
@@ -100,21 +106,24 @@ impl Worker {
 
         if let Err(e) = r {
             match e {
-                mpsc::error::TrySendError::Full(_v) => {},
+                mpsc::error::TrySendError::Full(_v) => {}
                 mpsc::error::TrySendError::Closed(_v) => {
-                    return Err(anyhow!("client already closed"))
-                },
+                    return Err(anyhow!("client already closed"));
+                }
             }
         }
         Ok(())
     }
 
     pub fn set_shutdown_mode(&self, force: bool) {
-        let v = if force { ShutdownMode::Force } else { ShutdownMode::Graceful };
+        let v = if force {
+            ShutdownMode::Force
+        } else {
+            ShutdownMode::Graceful
+        };
         self.shutdown_mode.store(v as u8, Ordering::Relaxed);
     }
 }
-
 
 struct Task<T: Delegate> {
     url: AStr,
@@ -129,17 +138,15 @@ struct Task<T: Delegate> {
 }
 
 impl<T: Delegate> Task<T> {
-
     #[trace_result]
     async fn run(mut self) {
-
         let r = self.try_run().await;
 
         let status = match r {
             Ok(_v) => {
                 debug!("finished Ok");
                 proto::Status::default()
-            },
+            }
             Err(e) => {
                 if let Some(status) = self.flag.got_closed.take() {
                     debug!("got closed");
@@ -149,7 +156,7 @@ impl<T: Delegate> Task<T> {
                     error!("{}", fmt_error!(err));
                     err.into()
                 }
-            },
+            }
         };
 
         let r = self.listener.on_closed(status).await;
@@ -161,7 +168,6 @@ impl<T: Delegate> Task<T> {
 
     #[trace_result]
     async fn try_run(&mut self) -> Result<()> {
-
         let mut session = self.phase_open().await?;
 
         // while !self.rx.is_closed() {
@@ -169,7 +175,7 @@ impl<T: Delegate> Task<T> {
             let r = self.phase_work(&mut session).await;
 
             if self.flag.got_closed.is_some() {
-                return Ok(())
+                return Ok(());
             }
 
             if self.rx.is_closed() {
@@ -180,9 +186,9 @@ impl<T: Delegate> Task<T> {
                     let status = proto::Status::from(&e);
                     if status.code == 0 {
                         debug!("phase_work ended with no error status");
-                        return Ok(())
+                        return Ok(());
                     }
-                    
+
                     error!("{}", trace_fmt!("phase_work failed", e));
                 }
             }
@@ -194,12 +200,14 @@ impl<T: Delegate> Task<T> {
     }
 
     #[trace_result]
-    #[instrument(name="work", skip(self, session))]
+    #[instrument(name = "work", skip(self, session))]
     async fn phase_work(&mut self, session: &mut Session) -> Result<()> {
         let mut rraw = RecvRaw::default();
 
         loop {
-            self.try_handle_op(session).await.with_context(||"try_handle_msgs failed")?;
+            self.try_handle_op(session)
+                .await
+                .with_context(|| "try_handle_msgs failed")?;
             let hb_deadline = session.heartbeat_deadline(&self.config.advance.connection);
 
             let r = if let Some(deadline) = hb_deadline {
@@ -215,12 +223,12 @@ impl<T: Delegate> Task<T> {
             } else {
                 self.recv_packet(&mut session.conn, &mut rraw, RecvCancelMode::Work)
                     .await
-                    .with_context(||"recv_packet falied")?
+                    .with_context(|| "recv_packet falied")?
             };
 
             let Some(packet) = r else {
                 if RecvCancelMode::Work.should_break(self.shutdown_mode()) {
-                    return Ok(())
+                    return Ok(());
                 }
                 continue;
             };
@@ -238,33 +246,32 @@ impl<T: Delegate> Task<T> {
             let Some(pkt_type) = packet.typ() else {
                 continue;
             };
-            
+
             match pkt_type {
                 proto::PacketType::Response => {
-                    let ack = packet.ack.with_context(||"no ack field in response")?;
+                    let ack = packet.ack.with_context(|| "no ack field in response")?;
                     let mut typed = packet.parse_as_server_rsp()?;
                     if session.try_handle_heartbeat_response(ack, &mut typed)? {
                         continue;
                     }
                     self.listener.on_response(session, ack, typed).await?;
                     // self.handle_response(session, ack, typed).await?;
-                },
+                }
 
-                proto::PacketType::Push0
-                | proto::PacketType::Push1
-                | proto::PacketType::Push2
-                => {
+                proto::PacketType::Push0 | proto::PacketType::Push1 | proto::PacketType::Push2 => {
                     let typed = packet.parse_as_server_push()?;
                     if let proto::ServerPushType::Closed(notice) = typed.typ {
                         let status = notice.status.unwrap_or_default();
-                        if let Err(e) = Self::flush_xfer_ack(&mut session.conn, &mut session.xfer).await {
+                        if let Err(e) =
+                            Self::flush_xfer_ack(&mut session.conn, &mut session.xfer).await
+                        {
                             warn!("{}", trace_fmt!("send ack for closed push failed", e));
                         }
                         if let Err(e) = session.conn.send_close_frame().await {
                             warn!("{}", trace_fmt!("send websocket close frame failed", e));
                         }
                         self.flag.got_closed = Some(status);
-                        return Ok(())
+                        return Ok(());
                     }
                     self.listener.on_push(session, typed).await?;
                 }
@@ -273,7 +280,6 @@ impl<T: Delegate> Task<T> {
                     return Err(anyhow!("unknown packet {:?}", packet));
                 }
             };
-
         }
 
         // Ok(())
@@ -288,8 +294,8 @@ impl<T: Delegate> Task<T> {
     //         },
     //         proto::ServerPushType::Chat(notice) => {
     //             const CHAT_DIV: char = '.';
-    //             const USER_PREFIX: &'static str = formatcp!("u{CHAT_DIV}"); 
-    //             const ROOM_PREFIX: &'static str = formatcp!("r{CHAT_DIV}"); 
+    //             const USER_PREFIX: &'static str = formatcp!("u{CHAT_DIV}");
+    //             const ROOM_PREFIX: &'static str = formatcp!("r{CHAT_DIV}");
 
     //             let Some(from_user_id) = notice.from.strip_prefix(USER_PREFIX) else {
     //                 warn!("unknown chat.from [{}]", notice.from);
@@ -337,7 +343,7 @@ impl<T: Delegate> Task<T> {
     //             if let Some(muted) = brief.camera_muted {
     //                 self.listener.on_add_stream(user_id.clone(), proto::StreamType::Camera.value(), muted)?;
     //             }
-                
+
     //             if let Some(muted) = brief.mic_muted {
     //                 self.listener.on_add_stream(user_id.clone(), proto::StreamType::Mic.value(), muted)?;
     //             }
@@ -372,7 +378,7 @@ impl<T: Delegate> Task<T> {
     //                                 self.listener.on_user_leaved(user_id.clone())?;
     //                                 cell.stage = UserStage::Init;
     //                             } else {
-    //                                 cell.delta(&new_state, &mut self.listener)?;    
+    //                                 cell.delta(&new_state, &mut self.listener)?;
     //                             }
 
     //                         },
@@ -386,8 +392,8 @@ impl<T: Delegate> Task<T> {
     //                         user_id.clone(),
     //                         UserCell {
     //                             user_id,
-    //                             state: new_state, 
-    //                             tree: Default::default(), 
+    //                             state: new_state,
+    //                             tree: Default::default(),
     //                             stage: UserStage::Init,
     //                         }
     //                     )
@@ -439,7 +445,7 @@ impl<T: Delegate> Task<T> {
     //     };
 
     //     let status = response.status.take().unwrap_or_default();
-        
+
     //     if status.code == 0 {
 
     //         handler.on_success(response.typ.with_context(||"no typ field in response")?)?;
@@ -456,7 +462,10 @@ impl<T: Delegate> Task<T> {
         //     self.handle_op(session, msg).await?;
         // }
 
-        self.listener.on_process(session).await.with_context(||"on_process failed")?;
+        self.listener
+            .on_process(session)
+            .await
+            .with_context(|| "on_process failed")?;
 
         let _ = Self::flush_xfer(&mut session.conn, &mut session.xfer).await?;
 
@@ -486,9 +495,8 @@ impl<T: Delegate> Task<T> {
         Ok(())
     }
 
-
     #[trace_result]
-    #[instrument(name="reconnect", skip(self, session))]
+    #[instrument(name = "reconnect", skip(self, session))]
     async fn phase_reconnect(&mut self, session: &mut Session) -> Result<()> {
         // NOTE:
         // Heartbeat is request/response only (no ack packet for HB response).
@@ -496,37 +504,41 @@ impl<T: Delegate> Task<T> {
         // otherwise client may keep waiting for a lost pre-disconnect HB response.
         // reconnect_session should reset heartbeat state on the working Session.
         timeout(
-            self.config.advance.connection.max_timeout(), 
+            self.config.advance.connection.max_timeout(),
             self.reconnect_loop(session),
         )
         .await
-        .map_err(|_e|anyhow!(
-            "reach max timeout [{:?}]", 
-            self.config.advance.connection.max_timeout())
-        )??;
+        .map_err(|_e| {
+            anyhow!(
+                "reach max timeout [{:?}]",
+                self.config.advance.connection.max_timeout()
+            )
+        })??;
         Ok(())
     }
 
     #[trace_result]
-    #[instrument(name="open", skip(self))]
+    #[instrument(name = "open", skip(self))]
     async fn phase_open(&mut self) -> Result<Session> {
-
         // 把执行 open_session 的时间也考虑到 max_timeout 里
 
         let (conn, raw, xfer) = timeout(
-            self.config.advance.connection.max_timeout(), 
+            self.config.advance.connection.max_timeout(),
             self.open_loop(),
         )
         .await
-        .map_err(|_e|anyhow!(
-            "reach max timeout [{:?}]", 
-            self.config.advance.connection.max_timeout())
-        )??;
+        .map_err(|_e| {
+            anyhow!(
+                "reach max timeout [{:?}]",
+                self.config.advance.connection.max_timeout()
+            )
+        })??;
 
-        let packet: proto::PacketRef = serde_json::from_str(raw.as_str())
-            .with_context(||"recv raw but invalid packet")?;
+        let packet: proto::PacketRef =
+            serde_json::from_str(raw.as_str()).with_context(|| "recv raw but invalid packet")?;
 
-        let rsp = parse_open_response_packet(&packet).with_context(||"parse_open_response_packet failed")?;
+        let rsp = parse_open_response_packet(&packet)
+            .with_context(|| "parse_open_response_packet failed")?;
 
         // let rsp = output.into_rsp().with_context(||"into_rsp falied")?;
 
@@ -544,7 +556,10 @@ impl<T: Delegate> Task<T> {
 
         session.start_heartbeat();
 
-        info!("opened session [{}], conn_id [{}]", session.session_id, session.conn_id);
+        info!(
+            "opened session [{}], conn_id [{}]",
+            session.session_id, session.conn_id
+        );
 
         let r = self.listener.on_opened(&mut session).await;
         if let Err(e) = r {
@@ -552,13 +567,11 @@ impl<T: Delegate> Task<T> {
         }
 
         Ok(session)
-
     }
 
     #[trace_result]
     async fn open_loop<'a>(&mut self) -> Result<(Conn, PacketRaw, Xfer)> {
         loop {
-
             let mut conn = self.connect_loop(RecvCancelMode::Connect).await?;
 
             let r = self.open_session(&mut conn).await;
@@ -567,24 +580,31 @@ impl<T: Delegate> Task<T> {
                 Ok((raw, xfer)) => return Ok((conn, raw, xfer)),
                 Err(e) => {
                     if RecvCancelMode::Connect.should_break(self.shutdown_mode()) {
-                        return Err(e)
+                        return Err(e);
                     }
                     warn!("{}", trace_fmt!("open_session failed", e));
-                    debug!("will retry opening session in [{:?}]", self.config.advance.connection.retry_interval());
-                    if !self.sleep(self.config.advance.connection.retry_interval(), RecvCancelMode::Connect).await? {
-                        return Err(anyhow!("open canceled"))
+                    debug!(
+                        "will retry opening session in [{:?}]",
+                        self.config.advance.connection.retry_interval()
+                    );
+                    if !self
+                        .sleep(
+                            self.config.advance.connection.retry_interval(),
+                            RecvCancelMode::Connect,
+                        )
+                        .await?
+                    {
+                        return Err(anyhow!("open canceled"));
                     }
                     continue;
-                },
+                }
             };
         }
-
     }
 
     #[trace_result]
     async fn reconnect_loop(&mut self, session: &mut Session) -> Result<()> {
         loop {
-
             let mut conn = self.connect_loop(RecvCancelMode::Work).await?;
 
             let r = self.reconnect_session(&mut conn, session).await;
@@ -593,23 +613,31 @@ impl<T: Delegate> Task<T> {
                 Ok(()) => return Ok(()),
                 Err(e) => {
                     if RecvCancelMode::Work.should_break(self.shutdown_mode()) {
-                        return Err(e)
+                        return Err(e);
                     }
                     if let Some(status) = e.downcast_ref::<proto::Status>() {
                         if status.code != 0 {
-                            return Err(e)
+                            return Err(e);
                         }
                     }
                     warn!("{}", trace_fmt!("reconnect_session failed", e));
-                    debug!("will retry reconnecting session in [{:?}]", self.config.advance.connection.retry_interval());
-                    if !self.sleep(self.config.advance.connection.retry_interval(), RecvCancelMode::Work).await? {
-                        return Err(anyhow!("reconnect canceled"))
+                    debug!(
+                        "will retry reconnecting session in [{:?}]",
+                        self.config.advance.connection.retry_interval()
+                    );
+                    if !self
+                        .sleep(
+                            self.config.advance.connection.retry_interval(),
+                            RecvCancelMode::Work,
+                        )
+                        .await?
+                    {
+                        return Err(anyhow!("reconnect canceled"));
                     }
                     continue;
-                },
+                }
             };
         }
-
     }
 
     #[trace_result]
@@ -631,23 +659,26 @@ impl<T: Delegate> Task<T> {
             ack: None,
         };
 
-        conn.send_packet_ser(&packet).await.with_context(||"send reconnect packet failed")?;
+        conn.send_packet_ser(&packet)
+            .await
+            .with_context(|| "send reconnect packet failed")?;
 
         let mut rraw = RecvRaw::default();
         loop {
-            let r = self.recv_packet(conn, &mut rraw, RecvCancelMode::Work)
+            let r = self
+                .recv_packet(conn, &mut rraw, RecvCancelMode::Work)
                 .await
-                .with_context(||"recv reconnect response failed")?;
+                .with_context(|| "recv reconnect response failed")?;
 
             let Some(packet) = r else {
                 if RecvCancelMode::Work.should_break(self.shutdown_mode()) {
-                    return Err(anyhow!("reconnect canceled"))
+                    return Err(anyhow!("reconnect canceled"));
                 }
                 continue;
             };
 
             let rsp = parse_reconnect_response_packet(&packet)
-                .with_context(||"parse_reconnect_response_packet failed")?;
+                .with_context(|| "parse_reconnect_response_packet failed")?;
 
             if let Some(ack_sn) = packet.ack {
                 session.xfer.update_recv_ack(ack_sn);
@@ -673,21 +704,19 @@ impl<T: Delegate> Task<T> {
                 self.reconnect_last_success_seq
             );
 
-            return Ok(())
+            return Ok(());
         }
     }
 
     #[trace_result]
     async fn connect_loop(&mut self, mode: RecvCancelMode) -> Result<Conn> {
-
         if mode.should_break(self.shutdown_mode()) {
-            return Err(anyhow!("connect canceled"))
+            return Err(anyhow!("connect canceled"));
         }
 
         loop {
-            
             debug!("connecting to [{}]...", self.url);
-            
+
             let r = self.connect_to(mode).await;
 
             let cfg = &self.config.advance.connection;
@@ -695,11 +724,11 @@ impl<T: Delegate> Task<T> {
             match r {
                 Ok(conn) => {
                     debug!("connected to [{}]", self.url);
-                    return Ok(conn)
-                },
+                    return Ok(conn);
+                }
                 Err(e) => {
                     if mode.should_break(self.shutdown_mode()) {
-                        return Err(e)
+                        return Err(e);
                     }
                     warn!("{}", trace_fmt!("connect failed", e))
                 }
@@ -707,7 +736,7 @@ impl<T: Delegate> Task<T> {
 
             debug!("will retry connecting in [{:?}]", cfg.retry_interval());
             if !self.sleep(cfg.retry_interval(), mode).await? {
-                return Err(anyhow!("connect canceled"))
+                return Err(anyhow!("connect canceled"));
             }
         }
     }
@@ -731,48 +760,46 @@ impl<T: Delegate> Task<T> {
                 }
             };
 
-            let stream = r
-                .map_err(|_e|anyhow!(
-                    "reach connect timeout [{:?}]", 
-                    cfg.connect_timeout())
-                )??;
+            let stream =
+                r.map_err(|_e| anyhow!("reach connect timeout [{:?}]", cfg.connect_timeout()))??;
 
-            return Ok(Conn {
-                    stream,
-                })
+            return Ok(Conn { stream });
         }
     }
 
-
     #[trace_result]
     async fn open_session<'a>(&mut self, conn: &mut Conn) -> Result<(PacketRaw, Xfer)> {
-
-        self.open_session_send(conn).await.with_context(||"open_session_send failed")?;
+        self.open_session_send(conn)
+            .await
+            .with_context(|| "open_session_send failed")?;
 
         let mut xfer = Xfer::new();
         self.listener.on_opening(&mut xfer).await?;
         let _ = Self::flush_xfer(conn, &mut xfer).await?;
 
         loop {
-            let r = self.recv_raw(conn, RecvCancelMode::Connect).await.with_context(||"recv_raw failed")?;
+            let r = self
+                .recv_raw(conn, RecvCancelMode::Connect)
+                .await
+                .with_context(|| "recv_raw failed")?;
             if let Some(raw) = r {
-                return Ok((raw, xfer))
+                return Ok((raw, xfer));
             }
             if RecvCancelMode::Connect.should_break(self.shutdown_mode()) {
-                return Err(anyhow!("open canceled"))
+                return Err(anyhow!("open canceled"));
             }
         }
     }
-
 
     #[trace_result]
     async fn open_session_send(&mut self, conn: &mut Conn) -> Result<()> {
         use crate::proto::IntoIterSerialize;
 
         let client_info = self.config.advance.client_info.as_ref().map(|ci| {
-            let device: Option<std::collections::HashMap<&str, &str>> = ci.device.as_ref().map(|m| {
-                m.iter().map(|(k, v)| (k.as_str(), v.as_str())).collect()
-            });
+            let device: Option<std::collections::HashMap<&str, &str>> = ci
+                .device
+                .as_ref()
+                .map(|m| m.iter().map(|(k, v)| (k.as_str(), v.as_str())).collect());
             let sdk = if ci.sdk_name.is_some() || ci.sdk_version.is_some() {
                 Some(proto::SdkInfoSer {
                     name: ci.sdk_name.as_deref(),
@@ -794,51 +821,58 @@ impl<T: Delegate> Task<T> {
             client_info,
             token: self.config.advance.token.as_deref(),
             user_ext: self.config.advance.user_ext.as_deref(),
-            user_tree: self.config.advance.user_tree
-                .as_ref()
-                .map(|x|
-                    x.iter().map(|y|proto::UpdateTreeRequestSer::from(y))
+            user_tree: self.config.advance.user_tree.as_ref().map(|x| {
+                x.iter()
+                    .map(|y| proto::UpdateTreeRequestSer::from(y))
                     .into_iter_ser()
-                ),
+            }),
             batch: self.config.advance.batch, // Some(true),
-            // create_x_requests: Option::<()>::None,
+                                              // create_x_requests: Option::<()>::None,
         };
 
         let packet = proto::PacketSer {
             typ: Some(proto::PacketType::Request.as_num()),
             sn: None, // Open 请求可以没有 sn
             body: Some(req.into_body()),
-            ack: None, // 
+            ack: None, //
         };
 
-        conn.send_packet_ser(&packet).await
-            .with_context(||"send_packet failed")?;
+        conn.send_packet_ser(&packet)
+            .await
+            .with_context(|| "send_packet failed")?;
 
         Ok(())
     }
 
-
     #[trace_result]
-    async fn recv_packet<'a>(&mut self, conn: &mut Conn, rraw: &'a mut RecvRaw, mode: RecvCancelMode) -> Result<Option<proto::PacketRef<'a>>> {
+    async fn recv_packet<'a>(
+        &mut self,
+        conn: &mut Conn,
+        rraw: &'a mut RecvRaw,
+        mode: RecvCancelMode,
+    ) -> Result<Option<proto::PacketRef<'a>>> {
         loop {
             let r = self.recv_raw(conn, mode).await?;
 
-            let Some(raw) = r else {
-                return Ok(None)
-            };
+            let Some(raw) = r else { return Ok(None) };
 
             rraw.raw = raw;
 
-            let packet: proto::PacketRef = serde_json::from_str(&rraw.raw.as_str()).with_context(||"parse packet failed")?;
+            let packet: proto::PacketRef =
+                serde_json::from_str(&rraw.raw.as_str()).with_context(|| "parse packet failed")?;
 
-            return Ok(Some(packet))
+            return Ok(Some(packet));
         }
-        
+
         // Ok(None)
     }
 
     #[trace_result]
-    async fn recv_raw<'a>(&mut self, conn: &mut Conn, mode: RecvCancelMode) -> Result<Option<PacketRaw>> {
+    async fn recv_raw<'a>(
+        &mut self,
+        conn: &mut Conn,
+        mode: RecvCancelMode,
+    ) -> Result<Option<PacketRaw>> {
         loop {
             tokio::select! {
                 r = self.rx.recv() => {
@@ -853,16 +887,20 @@ impl<T: Delegate> Task<T> {
                     r.with_context(||"wait_next_recv failed")?;
                 }
             }
-            
-            let r = conn.stream.recv_next_packet().await.with_context(||"wait_next_recv failed")?;
-            
+
+            let r = conn
+                .stream
+                .recv_next_packet()
+                .await
+                .with_context(|| "wait_next_recv failed")?;
+
             let Some(raw) = r else {
                 continue;
             };
 
             debug!("recv raw [{}]", raw.as_str());
 
-            return Ok(Some(raw))
+            return Ok(Some(raw));
         }
 
         // Ok(None)
@@ -870,7 +908,6 @@ impl<T: Delegate> Task<T> {
 
     #[trace_result]
     async fn sleep(&mut self, d: Duration, mode: RecvCancelMode) -> Result<bool> {
-
         let deadline = Instant::now() + d;
 
         loop {
@@ -898,17 +935,20 @@ impl<T: Delegate> Task<T> {
         let cfg = &self.config.advance.connection;
 
         if !cfg.heartbeat_enable() {
-            return Ok(())
+            return Ok(());
         }
 
         if session.heartbeat_timed_out(cfg.heartbeat_timeout()) {
-            return Err(anyhow!("heartbeat timeout"))
+            return Err(anyhow!("heartbeat timeout"));
         }
 
         if session.heartbeat_due(cfg.heartbeat_interval()) {
             if !session.has_pending_heartbeat() {
                 let body = proto::HeartbeatRequestSer {}.into_body();
-                let sn = session.xfer_mut().add_qos1_json(proto::PacketType::Request, &body, None)?;
+                let sn =
+                    session
+                        .xfer_mut()
+                        .add_qos1_json(proto::PacketType::Request, &body, None)?;
                 session.set_pending_heartbeat(sn);
                 session.on_heartbeat_sent();
                 let _ = Self::flush_xfer(&mut session.conn, &mut session.xfer).await?;
@@ -919,7 +959,6 @@ impl<T: Delegate> Task<T> {
     }
 }
 
-
 #[derive(Debug, Clone, Default)]
 struct Flag {
     got_closed: Option<proto::Status>,
@@ -927,7 +966,7 @@ struct Flag {
 
 impl Flag {
     fn check_guard(&mut self, r: Option<()>) -> Result<()> {
-        let r = r.with_context(||"got closed");
+        let r = r.with_context(|| "got closed");
         if r.is_err() {
             self.got_closed = Some(Default::default());
         }
@@ -967,23 +1006,22 @@ impl RecvCancelMode {
     }
 }
 
-
-
 #[trace_result]
 fn parse_open_response_packet(packet: &proto::PacketRef) -> Result<proto::OpenSessionResponse> {
     if packet.typ() != Some(proto::PacketType::Response) {
-        return Err(anyhow!("invalid packet type {:?}", packet.typ()))
+        return Err(anyhow!("invalid packet type {:?}", packet.typ()));
     }
 
-    let body = packet.body.as_ref().with_context(||"empty body")?;
+    let body = packet.body.as_ref().with_context(|| "empty body")?;
 
-    let mut server_rsp: proto::ServerResponse = serde_json::from_str(body).with_context(||"invalid json")?;
+    let mut server_rsp: proto::ServerResponse =
+        serde_json::from_str(body).with_context(|| "invalid json")?;
 
     if let Some(status) = server_rsp.status.take() {
-        return status.with_context(||"open response status")
+        return status.with_context(|| "open response status");
     }
 
-    let rsp_type = server_rsp.typ.with_context(||"invalid response type")?;
+    let rsp_type = server_rsp.typ.with_context(|| "invalid response type")?;
     match rsp_type {
         proto::response::ResponseType::Open(rsp) => {
             Ok(rsp)
@@ -992,30 +1030,29 @@ fn parse_open_response_packet(packet: &proto::PacketRef) -> Result<proto::OpenSe
             //     conn_id: rsp.conn_id,
             //     xfer: Xfer::new(),
             // })
-        },
-        _ => {
-            Err(anyhow!("unexpect response type"))
         }
+        _ => Err(anyhow!("unexpect response type")),
     }
 }
 
 #[trace_result]
 fn parse_reconnect_response_packet(packet: &proto::PacketRef) -> Result<proto::ReconnectResponse> {
     if packet.typ() != Some(proto::PacketType::Response) {
-        return Err(anyhow!("invalid packet type {:?}", packet.typ()))
+        return Err(anyhow!("invalid packet type {:?}", packet.typ()));
     }
 
-    let body = packet.body.as_ref().with_context(||"empty body")?;
+    let body = packet.body.as_ref().with_context(|| "empty body")?;
 
-    let mut server_rsp: proto::ServerResponse = serde_json::from_str(body).with_context(||"invalid json")?;
+    let mut server_rsp: proto::ServerResponse =
+        serde_json::from_str(body).with_context(|| "invalid json")?;
 
     if let Some(status) = server_rsp.status.take() {
         if status.code != 0 {
-            return Err(anyhow::Error::from(status))
+            return Err(anyhow::Error::from(status));
         }
     }
 
-    let rsp_type = server_rsp.typ.with_context(||"invalid response type")?;
+    let rsp_type = server_rsp.typ.with_context(|| "invalid response type")?;
     match rsp_type {
         proto::response::ResponseType::Reconn(rsp) => Ok(rsp),
         _ => Err(anyhow!("unexpect response type")),
@@ -1038,7 +1075,7 @@ impl Session {
     pub fn session_id(&self) -> &str {
         &self.session_id
     }
-    
+
     // pub fn set_close(&mut self, status: proto::Status) {
     //     self.close_status = Some(status);
     // }
@@ -1073,10 +1110,10 @@ impl Session {
 
     fn heartbeat_deadline(&self, cfg: &super::defines::ConnectionConfig) -> Option<Instant> {
         if !cfg.heartbeat_enable() {
-            return None
+            return None;
         }
         if !self.heartbeat_started {
-            return None
+            return None;
         }
         Some(self.last_hb_at + cfg.heartbeat_interval())
     }
@@ -1089,18 +1126,26 @@ impl Session {
         self.pending_hb_sn = Some(sn);
     }
 
-    fn try_handle_heartbeat_response(&mut self, ack: i64, response: &mut proto::ServerResponse) -> Result<bool> {
+    fn try_handle_heartbeat_response(
+        &mut self,
+        ack: i64,
+        response: &mut proto::ServerResponse,
+    ) -> Result<bool> {
         let is_hb = matches!(
             response.typ.as_ref(),
             Some(proto::response::ResponseType::HB(_))
         );
         if !is_hb {
-            return Ok(false)
+            return Ok(false);
         }
 
         let status = response.status.take().unwrap_or_default();
         if status.code != 0 {
-            return Err(anyhow!("heartbeat failed: code {}, reason {}", status.code, status.reason))
+            return Err(anyhow!(
+                "heartbeat failed: code {}, reason {}",
+                status.code,
+                status.reason
+            ));
         }
 
         if let Some(pending) = self.pending_hb_sn {
@@ -1114,8 +1159,6 @@ impl Session {
     }
 }
 
-
-
 #[derive(Debug, Default)]
 struct RecvRaw {
     raw: PacketRaw,
@@ -1126,9 +1169,8 @@ struct Conn {
 }
 
 impl Conn {
-
     #[trace_result]
-    pub async fn send_packet_ser<B>(&mut self, packet: &proto::PacketSer<B>) -> Result<()> 
+    pub async fn send_packet_ser<B>(&mut self, packet: &proto::PacketSer<B>) -> Result<()>
     where
         B: serde::Serialize,
     {
@@ -1149,24 +1191,24 @@ impl Conn {
         self.stream.send_close().await?;
         Ok(())
     }
-
 }
 
 type PacketRaw = tokio_tungstenite::tungstenite::Utf8Bytes;
-
-
-
-
-
-
-
-
 
 pub trait Delegate: Send + Sync + 'static {
     fn on_opening(&mut self, xfer: &mut Xfer) -> impl Future<Output = Result<()>> + Send;
     fn on_opened(&mut self, session: &mut Session) -> impl Future<Output = Result<()>> + Send;
     fn on_closed(&mut self, status: proto::Status) -> impl Future<Output = Result<()>> + Send;
     fn on_process(&mut self, session: &mut Session) -> impl Future<Output = Result<()>> + Send;
-    fn on_response(&mut self, session: &mut Session, ack: i64, response: proto::ServerResponse) -> impl Future<Output = Result<()>> + Send;
-    fn on_push(&mut self, session: &mut Session, push: proto::ServerPush) -> impl Future<Output = Result<()>> + Send;
+    fn on_response(
+        &mut self,
+        session: &mut Session,
+        ack: i64,
+        response: proto::ServerResponse,
+    ) -> impl Future<Output = Result<()>> + Send;
+    fn on_push(
+        &mut self,
+        session: &mut Session,
+        push: proto::ServerPush,
+    ) -> impl Future<Output = Result<()>> + Send;
 }

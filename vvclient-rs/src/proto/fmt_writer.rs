@@ -1,6 +1,8 @@
-
-use std::{fmt, io::{self, Write as _}};
 use serde::Serialize;
+use std::{
+    fmt,
+    io::{self, Write as _},
+};
 
 const BUF_SIZE: usize = 4096;
 
@@ -26,7 +28,9 @@ impl<'a, 'b> FmtWriter<'a, 'b> {
             match std::str::from_utf8(&self.buf[start..self.len]) {
                 Ok(s) => {
                     // 全部是有效 UTF-8
-                    self.f.write_str(s).map_err(|_| io::Error::new(io::ErrorKind::Other, "fmt error"))?;
+                    self.f
+                        .write_str(s)
+                        .map_err(|_| io::Error::new(io::ErrorKind::Other, "fmt error"))?;
                     start = self.len;
                 }
                 Err(e) => {
@@ -35,8 +39,11 @@ impl<'a, 'b> FmtWriter<'a, 'b> {
                         // 还没有完整的 UTF-8 字符，保留缓冲区等下一次写入
                         break;
                     }
-                    let s = unsafe { std::str::from_utf8_unchecked(&self.buf[start..start + valid]) };
-                    self.f.write_str(s).map_err(|_| io::Error::new(io::ErrorKind::Other, "fmt error"))?;
+                    let s =
+                        unsafe { std::str::from_utf8_unchecked(&self.buf[start..start + valid]) };
+                    self.f
+                        .write_str(s)
+                        .map_err(|_| io::Error::new(io::ErrorKind::Other, "fmt error"))?;
                     start += valid;
                 }
             }
@@ -95,16 +102,14 @@ where
     }
 }
 
-impl<T> serde::Serialize for JsonDisplay<T> 
-where 
+impl<T> serde::Serialize for JsonDisplay<T>
+where
     T: Serialize,
 {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
-        S: serde::Serializer 
+        S: serde::Serializer,
     {
         serializer.collect_str(self)
     }
 }
-
-

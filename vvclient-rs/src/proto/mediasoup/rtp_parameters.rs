@@ -1,16 +1,15 @@
 //! Collection of RTP-related data structures that are used to specify codec parameters and
 //! capabilities of various endpoints.
 
-
 use super::scalability_modes::ScalabilityMode;
 use serde::de::{MapAccess, Visitor};
 use serde::ser::SerializeStruct;
-use serde::{de, Deserialize, Deserializer, Serialize, Serializer};
+use serde::{Deserialize, Deserializer, Serialize, Serializer, de};
 use std::borrow::Cow;
 use std::collections::BTreeMap;
 use std::fmt;
 use std::iter::FromIterator;
-use std::num::{NonZeroU32, NonZeroU8};
+use std::num::{NonZeroU8, NonZeroU32};
 use std::str::FromStr;
 use thiserror::Error;
 
@@ -289,10 +288,10 @@ impl FromStr for MimeTypeAudio {
     type Err = ParseMimeTypeError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        if let Some((mtype, name)) =  s.split_once('/') {
+        if let Some((mtype, name)) = s.split_once('/') {
             if mtype.eq_ignore_ascii_case("audio") {
                 return Self::from_name(name)
-                    .map_err(|_e|ParseMimeTypeError::UnknownMimeType(s.into()))
+                    .map_err(|_e| ParseMimeTypeError::UnknownMimeType(s.into()));
             }
         }
         Err(ParseMimeTypeError::InvalidInput)
@@ -321,7 +320,6 @@ impl FromStr for MimeTypeAudio {
 }
 
 impl MimeTypeAudio {
-
     pub fn from_name(s: &str) -> Result<Self, ()> {
         if s.eq_ignore_ascii_case("opus") {
             Ok(Self::Opus)
@@ -414,14 +412,13 @@ impl FromStr for MimeTypeVideo {
     type Err = ParseMimeTypeError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        if let Some((mtype, name)) =  s.split_once('/') {
+        if let Some((mtype, name)) = s.split_once('/') {
             if mtype.eq_ignore_ascii_case("video") {
                 return Self::from_name(name)
-                    .map_err(|_e|ParseMimeTypeError::UnknownMimeType(s.into()))
+                    .map_err(|_e| ParseMimeTypeError::UnknownMimeType(s.into()));
             }
         }
         Err(ParseMimeTypeError::InvalidInput)
-        
 
         // let s = s.to_ascii_lowercase();
         // match s.as_str() {
@@ -442,7 +439,6 @@ impl FromStr for MimeTypeVideo {
 }
 
 impl MimeTypeVideo {
-
     pub fn from_name(s: &str) -> Result<Self, ()> {
         if s.eq_ignore_ascii_case("vp8") {
             Ok(Self::Vp8)
@@ -675,7 +671,9 @@ impl FromStr for RtpHeaderExtensionUri {
             "urn:ietf:params:rtp-hdrext:sdes:rtp-stream-id" => Ok(Self::RtpStreamId),
             "urn:ietf:params:rtp-hdrext:sdes:repaired-rtp-stream-id" => Ok(Self::RepairRtpStreamId),
             "urn:ietf:params:rtp-hdrext:ssrc-audio-level" => Ok(Self::AudioLevel),
-            "https://aomediacodec.github.io/av1-rtp-spec/#dependency-descriptor-rtp-header-extension" => Ok(Self::DependencyDescriptor),
+            "https://aomediacodec.github.io/av1-rtp-spec/#dependency-descriptor-rtp-header-extension" => {
+                Ok(Self::DependencyDescriptor)
+            }
             "urn:3gpp:video-orientation" => Ok(Self::VideoOrientation),
             "urn:ietf:params:rtp-hdrext:toffset" => Ok(Self::TimeOffset),
             "http://www.ietf.org/id/draft-holmer-rmcat-transport-wide-cc-extensions-01" => {
@@ -701,7 +699,9 @@ impl RtpHeaderExtensionUri {
             RtpHeaderExtensionUri::RepairRtpStreamId => {
                 "urn:ietf:params:rtp-hdrext:sdes:repaired-rtp-stream-id"
             }
-            RtpHeaderExtensionUri::DependencyDescriptor => "https://aomediacodec.github.io/av1-rtp-spec/#dependency-descriptor-rtp-header-extension",
+            RtpHeaderExtensionUri::DependencyDescriptor => {
+                "https://aomediacodec.github.io/av1-rtp-spec/#dependency-descriptor-rtp-header-extension"
+            }
             RtpHeaderExtensionUri::AudioLevel => "urn:ietf:params:rtp-hdrext:ssrc-audio-level",
             RtpHeaderExtensionUri::VideoOrientation => "urn:3gpp:video-orientation",
             RtpHeaderExtensionUri::TimeOffset => "urn:ietf:params:rtp-hdrext:toffset",

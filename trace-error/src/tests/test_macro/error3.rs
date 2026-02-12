@@ -1,8 +1,7 @@
-use anyhow::{Result, Error};
 use crate::tests::trace_result;
+use anyhow::{Error, Result};
 
 use crate::assert_contains;
-
 
 pub const ERROR1: &'static str = "at src/tests/test_macro/error3.rs:11:5, error1()";
 
@@ -23,7 +22,7 @@ pub const THROW_ERR_2: &'static str = "at src/tests/test_macro/error3.rs:26:45, 
 
 #[trace_result]
 fn throw_err_2() -> Result<()> {
-    error1().with_context(||"error1 failed")?;
+    error1().with_context(|| "error1 failed")?;
     Ok(())
 }
 
@@ -31,17 +30,14 @@ pub const THROW_ERR_3: &'static str = "at src/tests/test_macro/error3.rs:35:41, 
 
 #[trace_result]
 fn throw_err_3() -> Result<()> {
-    error1()
-        .with_context(||"error1 failed")?;
+    error1().with_context(|| "error1 failed")?;
     Ok(())
 }
-
 
 // 以上行数不要修改
 // ====================================
 
 const ERROR_MSG: &'static str = "it-is-error-message";
-
 
 #[test]
 fn test_error() {

@@ -1,10 +1,8 @@
-
-
+use quote::quote;
+use std::borrow::Cow;
 use syn::parse::{Parse, ParseStream};
 use syn::token::{Comma, Semi};
 use syn::{Block, Expr, Ident, Token};
-use std::borrow::Cow;
-use quote::quote;
 
 // macro_rules! dbgd {
 //     ($($arg:tt)* ) => (
@@ -14,7 +12,6 @@ use quote::quote;
 
 type SynPat = syn::Pat;
 // type SynPat = syn::PatType;
-
 
 pub struct SelectBranch {
     /// optional left side: either a pattern (pat) followed by `=` and an expression,
@@ -27,8 +24,6 @@ pub struct SelectBranch {
     pub body: Block,
 }
 
-
-
 pub struct Select {
     pub biased: bool,
     pub branches: Vec<SelectBranch>,
@@ -37,18 +32,13 @@ pub struct Select {
 impl Parse for Select {
     fn parse(input: ParseStream) -> syn::Result<Self> {
         let span = input.span();
-        let r = Self::parse_me(input)
-            .map_err(|e| {
-                syn::Error::new(span, format!("{e:?}"))
-            })?;
+        let r = Self::parse_me(input).map_err(|e| syn::Error::new(span, format!("{e:?}")))?;
         Ok(r)
     }
 }
 
 impl Select {
-    
     pub fn is_select_macro(mac: &syn::Macro) -> bool {
-
         // let suffixes = ["select", "select_biased"];
 
         mac.path
@@ -66,10 +56,8 @@ impl Select {
         let mut biased = false;
         // handle optional `biased;` or `biased` followed by semicolon
         if input.peek(Ident) {
-            
             let fork = input.fork();
             if let Ok(ident) = fork.parse::<Ident>() {
-                
                 if ident == "biased" {
                     // consume ident
                     let _ = input.parse::<Ident>()?;
@@ -94,7 +82,6 @@ impl Select {
             // skip optional punctuation (commas/newlines)
             // parse one branch: either `pat = expr => block` or `expr => block` or `default => block` etc.
 
-            
             // parse potential left: try parsing a pattern first
             // We attempt to parse a Pat and then see if next token is '='.
             let ahead = input.fork();
@@ -132,7 +119,7 @@ impl Select {
                 if id == "default" || id == "complete" {
                     // commit
                     let _id = input.parse::<Ident>()?;
-                    // expect => 
+                    // expect =>
                     let _arr: Token![=>] = input.parse()?;
                     let body: Block = input.parse()?;
                     if input.peek(Comma) {
@@ -174,7 +161,7 @@ impl Select {
             }
 
             // if nothing matched
-            return Err(rootcause::report!("unknown branch"))
+            return Err(rootcause::report!("unknown branch"));
         }
 
         Ok(Select { biased, branches })
@@ -202,24 +189,21 @@ impl core::fmt::Debug for SelectBranch {
 #[derive(Debug)]
 struct StrBranch<'a> {
     pub left_pat: Option<Cow<'a, str>>,
-    pub left_eq_expr: Option<Cow<'a, str>>, 
+    pub left_eq_expr: Option<Cow<'a, str>>,
     pub expr: Option<Cow<'a, str>>,
     pub body: Cow<'a, str>,
 }
 
 impl From<&SelectBranch> for StrBranch<'static> {
     fn from(other: &SelectBranch) -> Self {
-        let left_pat = other.left_pat
+        let left_pat = other.left_pat.as_ref().map(|x| quote! { #x }.to_string());
+
+        let left_eq_expr = other
+            .left_eq_expr
             .as_ref()
             .map(|x| quote! { #x }.to_string());
 
-        let left_eq_expr = other.left_eq_expr
-            .as_ref()
-            .map(|x| quote! { #x }.to_string());
-
-        let expr = other.expr
-            .as_ref()
-            .map(|x| quote! { #x }.to_string());
+        let expr = other.expr.as_ref().map(|x| quote! { #x }.to_string());
 
         let body = {
             let x = &other.body;
@@ -227,9 +211,9 @@ impl From<&SelectBranch> for StrBranch<'static> {
         };
 
         Self {
-            left_pat: left_pat.map(|x|Cow::Owned(x)),
-            left_eq_expr: left_eq_expr.map(|x|Cow::Owned(x)),
-            expr: expr.map(|x|Cow::Owned(x)),
+            left_pat: left_pat.map(|x| Cow::Owned(x)),
+            left_eq_expr: left_eq_expr.map(|x| Cow::Owned(x)),
+            expr: expr.map(|x| Cow::Owned(x)),
             body: Cow::Owned(body),
         }
     }
@@ -241,11 +225,10 @@ impl<'a> PartialEq<StrBranchRef<'_>> for StrBranch<'a> {
     }
 }
 
-
 #[derive(Debug)]
 struct StrBranchRef<'a> {
     pub left_pat: Option<&'a str>,
-    pub left_eq_expr: Option<&'a str>, 
+    pub left_eq_expr: Option<&'a str>,
     pub expr: Option<&'a str>,
     pub body: &'a str,
 }
@@ -253,9 +236,9 @@ struct StrBranchRef<'a> {
 impl<'a> PartialEq<StrBranch<'_>> for StrBranchRef<'a> {
     fn eq(&self, other: &StrBranch<'_>) -> bool {
         self.left_pat == other.left_pat.as_deref()
-        && self.left_eq_expr == other.left_eq_expr.as_deref()
-        && self.expr == other.expr.as_deref()
-        && self.body == other.body
+            && self.left_eq_expr == other.left_eq_expr.as_deref()
+            && self.expr == other.expr.as_deref()
+            && self.body == other.body
     }
 }
 
@@ -265,7 +248,6 @@ impl<'a> PartialEq<SelectBranch> for StrBranchRef<'a> {
         self.eq(&other)
     }
 }
-
 
 /// 为 SelectBranch 实现 ToTokens
 impl quote::ToTokens for SelectBranch {
@@ -357,7 +339,6 @@ impl quote::ToTokens for Select {
     }
 }
 
-
 #[cfg(test)]
 mod tests {
 
@@ -365,24 +346,23 @@ mod tests {
 
     use super::*;
     use proc_macro2::TokenStream;
-    use syn::{parse_str, ItemFn};
     use quote::quote;
+    use syn::{ItemFn, parse_str};
 
     #[test]
     #[ignore = "poc"]
     fn poc() {
-        let token = 
-            quote! {
-                unnamed::select! {
-                    a = chan_a.recv() => {
-                        handle_a();
-                    },
-                    b = chan_b.recv() => {
-                        handle_b();
-                    }, 
-                }
-            };
-        
+        let token = quote! {
+            unnamed::select! {
+                a = chan_a.recv() => {
+                    handle_a();
+                },
+                b = chan_b.recv() => {
+                    handle_b();
+                },
+            }
+        };
+
         let expr: Expr = syn::parse2::<Expr>(token).expect("parse token failed");
 
         let mac = match expr {
@@ -392,7 +372,8 @@ mod tests {
 
         // assert_eq!(Select::is_select_macro(&mac), is_select);
 
-        let select: Select = syn::parse2(mac.tokens).expect("parse Select from macro tokens failed");
+        let select: Select =
+            syn::parse2(mac.tokens).expect("parse Select from macro tokens failed");
 
         let output = quote! {#select};
 
@@ -401,7 +382,6 @@ mod tests {
 
     #[test]
     fn test_parse() {
-
         check_select(
             quote! {
                 unnamed::select! {
@@ -410,10 +390,10 @@ mod tests {
                     },
                     b = chan_b.recv() => {
                         handle_b();
-                    }, 
+                    },
                 }
-            }, 
-            true, 
+            },
+            true,
             false,
             &[
                 StrBranchRef {
@@ -422,19 +402,22 @@ mod tests {
                     expr: None,
                     body: "{ handle_a () ; }",
                 },
-
                 StrBranchRef {
                     left_pat: Some("b"),
                     left_eq_expr: Some("chan_b . recv ()"),
                     expr: None,
                     body: "{ handle_b () ; }",
                 },
-            ]
+            ],
         );
-
     }
 
-    fn check_select(token: TokenStream, is_select: bool, biased: bool, branches: &[StrBranchRef<'_>]) {
+    fn check_select(
+        token: TokenStream,
+        is_select: bool,
+        biased: bool,
+        branches: &[StrBranchRef<'_>],
+    ) {
         let expr: Expr = syn::parse2::<Expr>(token).expect("parse token failed");
 
         let mac = match expr {
@@ -444,7 +427,8 @@ mod tests {
 
         assert_eq!(Select::is_select_macro(&mac), is_select);
 
-        let select: Select = syn::parse2(mac.tokens).expect("parse Select from macro tokens failed");
+        let select: Select =
+            syn::parse2(mac.tokens).expect("parse Select from macro tokens failed");
 
         assert_eq!(select.biased, biased);
 
@@ -454,7 +438,4 @@ mod tests {
             assert_eq!(branch1, branch2);
         }
     }
-
 }
-
-

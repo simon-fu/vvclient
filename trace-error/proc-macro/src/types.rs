@@ -5,7 +5,13 @@ use syn::{Expr, Token};
 pub(crate) trait Tracable {
     fn gen_use_stmt(&self) -> syn::Stmt;
     fn trace_result(&self, span: Span, fn_name: &Ident, expr: &Expr) -> Expr;
-    fn trace_error(&self, span: Span, fn_name: &Ident, context: Option<&Expr>, error: &Expr) -> TokenStream2;
+    fn trace_error(
+        &self,
+        span: Span,
+        fn_name: &Ident,
+        context: Option<&Expr>,
+        error: &Expr,
+    ) -> TokenStream2;
     fn format_error(&self, span: Span, error: &TokenStream2) -> TokenStream2;
 }
 
@@ -27,7 +33,6 @@ impl syn::parse::Parse for TraceErrorMacroArgs {
     }
 }
 
-
 pub(crate) struct Anyhow;
 
 impl Tracable for Anyhow {
@@ -48,7 +53,13 @@ impl Tracable for Anyhow {
         syn::parse2(new_tokens).expect("anyhow.attach_result parse generated expr")
     }
 
-    fn trace_error(&self, span: Span, fn_name: &Ident, context: Option<&Expr>, error: &Expr) -> TokenStream2 {
+    fn trace_error(
+        &self,
+        span: Span,
+        fn_name: &Ident,
+        context: Option<&Expr>,
+        error: &Expr,
+    ) -> TokenStream2 {
         let new_tokens = match context {
             Some(context) => {
                 quote_spanned! { span =>
@@ -76,10 +87,9 @@ impl Tracable for Anyhow {
 
     fn format_error(&self, span: Span, error: &TokenStream2) -> TokenStream2 {
         // let ts = self.attach_error(span, fn_name, context, error);
-        
+
         quote_spanned! { span =>
             format_args!("{:?}", #error)
         }
     }
 }
-

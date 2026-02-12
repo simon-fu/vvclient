@@ -1,58 +1,59 @@
-
-
 use std::sync::Arc;
 
 use proc_macro::TokenStream;
 use quote::quote;
 
 use syn::{
-    Block, Expr, ExprReturn, ExprTry, Ident, ItemFn, Stmt, fold::{Fold, fold_block}, spanned::Spanned
+    Block, Expr, ExprReturn, ExprTry, Ident, ItemFn, Stmt,
+    fold::{Fold, fold_block},
+    spanned::Spanned,
 };
 
-use crate::{macro_replacer::MacroReplacer, select::Select, types::{Tracable, TraceErrorMacroArgs}};
-
-
+use crate::{
+    macro_replacer::MacroReplacer,
+    select::Select,
+    types::{Tracable, TraceErrorMacroArgs},
+};
 
 macro_rules! dbgd {
-    ($($arg:tt)* ) => (
+    ($($arg:tt)* ) => {
         // eprintln!($($arg)*)
-    );
+    };
 }
 
-
-
-
-pub(crate) fn attach_function<T>(mut input: ItemFn, tracer: T) -> TokenStream 
-where 
+pub(crate) fn attach_function<T>(mut input: ItemFn, tracer: T) -> TokenStream
+where
     T: Tracable + 'static,
 {
     // dbgd!("input = [{}]", quote! {#input});
 
-
     let use_stmt: Stmt = tracer.gen_use_stmt();
 
     let fn_name = input.sig.ident.clone();
-    
+
     let tracer = Arc::new(tracer);
 
     let enable_attach_result = if let syn::ReturnType::Default = input.sig.output {
-            false
-        } else {
-            true
-        };
+        false
+    } else {
+        true
+    };
 
     let mut macro_replayer = MacroReplacer::default();
 
     {
         let fn_ident = fn_name.clone();
-        macro_replayer.add("trace_here".into(), Box::new(move |span, _args| {
-            quote::quote_spanned! { span =>
-                concat!(
-                    "at ", file!(), ":", line!(), ":", column!(), ", ",
-                    stringify!(#fn_ident), "()"
-                )
-            }
-        }));
+        macro_replayer.add(
+            "trace_here".into(),
+            Box::new(move |span, _args| {
+                quote::quote_spanned! { span =>
+                    concat!(
+                        "at ", file!(), ":", line!(), ":", column!(), ", ",
+                        stringify!(#fn_ident), "()"
+                    )
+                }
+            }),
+        );
     }
 
     {
@@ -61,11 +62,19 @@ where
             let tracer = tracer.clone();
             let name = "trace_error";
 
-            macro_replayer.add(name.into(), Box::new(move |span, args| {
-                let typed_args = syn::parse2::<TraceErrorMacroArgs>(args.clone())
-                    .expect(&format!("invalid format for {}", name));
-                tracer.trace_error(span, &fn_ident, Some(&typed_args.context), &typed_args.error)
-            }));
+            macro_replayer.add(
+                name.into(),
+                Box::new(move |span, args| {
+                    let typed_args = syn::parse2::<TraceErrorMacroArgs>(args.clone())
+                        .expect(&format!("invalid format for {}", name));
+                    tracer.trace_error(
+                        span,
+                        &fn_ident,
+                        Some(&typed_args.context),
+                        &typed_args.error,
+                    )
+                }),
+            );
         }
 
         {
@@ -73,26 +82,33 @@ where
             let tracer = tracer.clone();
             let name: &str = "trace_fmt";
 
-            macro_replayer.add(name.into(), Box::new(move |span, args| {
-                let typed_args = syn::parse2::<TraceErrorMacroArgs>(args.clone())
-                    .expect(&format!("invalid format for {}", name));
-                let error_ts = tracer.trace_error(span, &fn_ident, Some(&typed_args.context), &typed_args.error);
-                tracer.format_error(span, &error_ts)
-            }));
+            macro_replayer.add(
+                name.into(),
+                Box::new(move |span, args| {
+                    let typed_args = syn::parse2::<TraceErrorMacroArgs>(args.clone())
+                        .expect(&format!("invalid format for {}", name));
+                    let error_ts = tracer.trace_error(
+                        span,
+                        &fn_ident,
+                        Some(&typed_args.context),
+                        &typed_args.error,
+                    );
+                    tracer.format_error(span, &error_ts)
+                }),
+            );
         }
 
         {
             let tracer = tracer.clone();
             let name: &str = "fmt_error";
 
-            macro_replayer.add(name.into(), Box::new(move |span, args| {
-                tracer.format_error(span, &args)
-            }));
+            macro_replayer.add(
+                name.into(),
+                Box::new(move |span, args| tracer.format_error(span, &args)),
+            );
         }
     }
 
-
-    
     let mut rewriter = TryRewriter {
         fn_name,
         tracer,
@@ -101,7 +117,6 @@ where
     };
 
     let new_block = rewriter.fold_block(*input.block);
-
 
     // construct final block with the use stmt at the beginning
     let mut stmts = new_block.stmts;
@@ -120,21 +135,16 @@ where
     TokenStream::from(quote! { #input })
 }
 
-
-
-
-
-
-// fn replace_mac_with<F>(mac_name: &str, mac: &syn::Macro, attrs: &Vec<syn::Attribute>, func: &F) -> Option<Expr> 
-// where 
+// fn replace_mac_with<F>(mac_name: &str, mac: &syn::Macro, attrs: &Vec<syn::Attribute>, func: &F) -> Option<Expr>
+// where
 //     F: Fn(proc_macro2::Span, proc_macro2::TokenStream) -> proc_macro2::TokenStream,
 // {
 
 //     if !mac.path.is_ident(mac_name) {
 //         let (tokens, replaced) = replace_macro_token_with(mac_name, mac.tokens.clone(), func);
-    
+
 //         if !replaced {
-//             return None            
+//             return None
 //         }
 
 //         let mut new_mac = mac.clone();
@@ -159,9 +169,8 @@ where
 //     return Some(new_expr);
 // }
 
-
-// fn replace_macro_token_with<F>(mac_name: &str, ts: proc_macro2::TokenStream, func: &F) -> (proc_macro2::TokenStream, bool) 
-// where 
+// fn replace_macro_token_with<F>(mac_name: &str, ts: proc_macro2::TokenStream, func: &F) -> (proc_macro2::TokenStream, bool)
+// where
 //     F: Fn(proc_macro2::Span, proc_macro2::TokenStream) -> proc_macro2::TokenStream,
 // {
 //     let mut out = proc_macro2::TokenStream::new();
@@ -177,7 +186,7 @@ where
 //                 if yes {
 //                     replaced = true;
 //                 }
-                
+
 //                 let mut new_group = proc_macro2::Group::new(g.delimiter(), new_stream);
 //                 new_group.set_span(span);
 //                 out.extend(std::iter::once(proc_macro2::TokenTree::Group(new_group)));
@@ -203,7 +212,7 @@ where
 //                                     let args = g.stream();
 
 //                                     let tokens = func(span, args);
-                                  
+
 //                                     // insert generated tokens (already TokenStream2)
 //                                     out.extend(tokens);
 //                                     replaced = true;
@@ -243,8 +252,6 @@ where
 //     (out, replaced)
 // }
 
-
-
 struct TryRewriter<T> {
     fn_name: Ident,
     tracer: Arc<T>,
@@ -252,60 +259,57 @@ struct TryRewriter<T> {
     macro_replayer: MacroReplacer,
 }
 
-impl<T> TryRewriter<T> 
-where 
+impl<T> TryRewriter<T>
+where
     T: Tracable,
 {
-    fn attach_last_stmt(&mut self, last: Stmt, ) -> Stmt {
+    fn attach_last_stmt(&mut self, last: Stmt) -> Stmt {
         match last {
             Stmt::Expr(Expr::Return(_), _) => last,
             Stmt::Expr(Expr::Loop(_), _) => last,
             Stmt::Expr(expr, semi) => {
                 let span = expr.span();
                 let new_expr = self.try_attach_expr(expr, span);
-                dbgd!("attach_last_stmt: new_expr [{}]", quote!{#new_expr});
+                dbgd!("attach_last_stmt: new_expr [{}]", quote! {#new_expr});
                 Stmt::Expr(new_expr, semi)
             }
-            _ => last
+            _ => last,
         }
     }
 
     fn try_attach_expr(&mut self, mut expr: Expr, span: proc_macro2::Span) -> Expr {
-        
         match &mut expr {
             Expr::Macro(mac) => {
-
                 self.attach_mac(&mut mac.mac);
 
                 return match self.replace_macro(&mac) {
                     Some(new_expr) => new_expr,
                     None => expr,
-                }
+                };
 
                 // return expr
-            },
+            }
             _ => {}
         }
 
         if !self.enable_attach_result {
-            return expr
+            return expr;
         }
 
         if is_ok_constructor(&expr) {
-            return expr
+            return expr;
         }
-        
+
         let new_expr = self.tracer.trace_result(span, &self.fn_name, &expr);
-        
+
         new_expr
-        
+
         // attach_expr(&expr, fn_name, func())
     }
 
     fn attach_mac(&mut self, mac: &mut syn::Macro) {
-
         if !Select::is_select_macro(&mac) {
-            return 
+            return;
         }
 
         mac.tokens = self.attach_select_token(mac.tokens.clone());
@@ -315,7 +319,11 @@ where
         self.replace_macro_detail(&expr_mac.mac, &expr_mac.attrs)
     }
 
-    fn replace_macro_detail(&mut self, mac: &syn::Macro, attrs: &Vec<syn::Attribute>) -> Option<Expr> {
+    fn replace_macro_detail(
+        &mut self,
+        mac: &syn::Macro,
+        attrs: &Vec<syn::Attribute>,
+    ) -> Option<Expr> {
         self.macro_replayer.try_replace(mac, attrs)
     }
 
@@ -337,9 +345,8 @@ where
     }
 }
 
-
-impl<T> Fold for TryRewriter<T> 
-where 
+impl<T> Fold for TryRewriter<T>
+where
     T: Tracable,
 {
     // override fold_expr_try to catch `expr?`
@@ -347,10 +354,7 @@ where
         // 先递归折叠子节点
         let folded_inner = syn::fold::fold_expr_try(self, i);
 
-        let new_expr = self.try_attach_expr(
-            *folded_inner.expr, 
-            folded_inner.question_token.span(),
-        );
+        let new_expr = self.try_attach_expr(*folded_inner.expr, folded_inner.question_token.span());
 
         dbgd!("fold_expr_try: new_expr [{}]", quote! { #new_expr });
 
@@ -358,29 +362,31 @@ where
             attrs: folded_inner.attrs,
             expr: Box::new(new_expr),
             question_token: folded_inner.question_token,
-        }       
+        }
     }
 
     fn fold_expr_return(&mut self, i: ExprReturn) -> ExprReturn {
-        
         // dbgd!("fold_expr_return: inner_expr [{}]", quote!{#i});
 
         let folded = syn::fold::fold_expr_return(self, i);
 
-        if let ExprReturn { attrs, return_token, expr: Some(ret_expr) } = folded {
+        if let ExprReturn {
+            attrs,
+            return_token,
+            expr: Some(ret_expr),
+        } = folded
+        {
             let new_expr = self.try_attach_expr(*ret_expr, return_token.span);
-            dbgd!("fold_expr_return: new_expr [{}]", quote!{#new_expr});
+            dbgd!("fold_expr_return: new_expr [{}]", quote! {#new_expr});
 
             ExprReturn {
                 attrs,
                 return_token,
                 expr: Some(Box::new(new_expr)),
             }
-
         } else {
             folded
         }
-
     }
 
     fn fold_expr(&mut self, mut expr: Expr) -> Expr {
@@ -391,14 +397,13 @@ where
                 return match self.replace_macro(&mac) {
                     Some(new_expr) => new_expr,
                     None => expr,
-                }
+                };
             }
             _ => syn::fold::fold_expr(self, expr),
         }
     }
 
     fn fold_block(&mut self, b: Block) -> Block {
-
         let mut new_block = fold_block(self, b);
 
         for stmt in new_block.stmts.iter_mut() {
@@ -407,17 +412,17 @@ where
                     self.attach_mac(&mut mac.mac);
 
                     if let Some(new_expr) = self.replace_macro(&mac) {
-                        *stmt = Stmt::Expr(new_expr, semi.clone()) 
+                        *stmt = Stmt::Expr(new_expr, semi.clone())
                     }
                 }
                 Stmt::Macro(mac) => {
                     self.attach_mac(&mut mac.mac);
 
                     if let Some(new_expr) = self.replace_macro_detail(&mac.mac, &mac.attrs) {
-                        *stmt = Stmt::Expr(new_expr, mac.semi_token.clone()) 
+                        *stmt = Stmt::Expr(new_expr, mac.semi_token.clone())
                     }
                 }
-                _ => {},
+                _ => {}
             }
         }
         new_block
@@ -426,7 +431,6 @@ where
     // other nodes are folded with defaults
 }
 
-
 /// 简单判断一个表达式是否是 `Ok(...)` 。
 /// 匹配的形式包括 `Ok(...)`, `std::result::Result::Ok(...)` 等.
 fn is_ok_constructor(expr: &Expr) -> bool {
@@ -434,12 +438,9 @@ fn is_ok_constructor(expr: &Expr) -> bool {
         if let Expr::Path(path_expr) = &*call.func {
             if let Some(seg) = path_expr.path.segments.last() {
                 let ident = seg.ident.to_string();
-                return ident == "Ok" // || ident == "Err";
+                return ident == "Ok"; // || ident == "Err";
             }
         }
     }
     false
 }
-
-
-

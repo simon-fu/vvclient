@@ -1,6 +1,8 @@
 use std::collections::VecDeque;
 
-use crate::proto::{IdRef, PacketRef, PacketSer, PacketType, ServerPushRef, ServerResponseRef, Status};
+use crate::proto::{
+    IdRef, PacketRef, PacketSer, PacketType, ServerPushRef, ServerResponseRef, Status,
+};
 
 use anyhow::Result;
 
@@ -14,7 +16,6 @@ pub struct Xfer {
     send_index: usize,
     // sent_sn: i64,
     // recv_ack_sn: i64,
-
     recv_sn: i64,
     sent_ack_sn: i64,
 }
@@ -62,18 +63,27 @@ impl Xfer {
         self.sent_ack_sn = 0;
     }
 
-    pub fn add_qos1_typed<B>(&mut self, typ: PacketType, body: &B, msg_id: Option<i64>) -> Result<i64>
-    where 
+    pub fn add_qos1_typed<B>(
+        &mut self,
+        typ: PacketType,
+        body: &B,
+        msg_id: Option<i64>,
+    ) -> Result<i64>
+    where
         B: serde::Serialize,
     {
         let body_json = serde_json::to_string(body)?;
-        
+
         self.add_qos1_json(typ, &body_json, msg_id)
     }
 
-    pub fn add_qos1_json<B: core::fmt::Display + serde::Serialize>(&mut self, typ: PacketType, body_json: B, msg_id: Option<i64>) -> Result<i64> {
+    pub fn add_qos1_json<B: core::fmt::Display + serde::Serialize>(
+        &mut self,
+        typ: PacketType,
+        body_json: B,
+        msg_id: Option<i64>,
+    ) -> Result<i64> {
         let sn = self.tail_sn + 1;
-
 
         let mut packet = PacketSer {
             sn: Some(sn),
@@ -90,7 +100,7 @@ impl Xfer {
         let packet_json = serde_json::to_string(&packet)?;
 
         // debug!("added qos1 [{}]", packet_json);
-        
+
         self.que.push_back((sn, packet_json));
         self.tail_sn = sn;
         Ok(sn)
@@ -103,7 +113,7 @@ impl Xfer {
                     self.sent_ack_sn = ack;
                 }
                 Some(ack)
-            },
+            }
             None => {
                 if self.sent_ack_sn < self.recv_sn {
                     self.sent_ack_sn = self.recv_sn;
@@ -111,7 +121,7 @@ impl Xfer {
                 } else {
                     None
                 }
-            },
+            }
         }
     }
 
@@ -120,21 +130,18 @@ impl Xfer {
     }
 
     pub fn add_push_typed<B>(&mut self, body: &B) -> Result<i64>
-    where 
+    where
         B: serde::Serialize,
     {
         self.add_qos1_typed(PacketType::Push1, body, None)
     }
 
     pub fn add_user_ready(&mut self, user_id: &str) -> Result<i64> {
-        self.add_push_typed(&ServerPushRef::user_ready(IdRef {
-            id: user_id
-        }))
+        self.add_push_typed(&ServerPushRef::user_ready(IdRef { id: user_id }))
     }
 
-
     pub fn add_response_typed<B>(&mut self, body: &B, msg_id: Option<i64>) -> Result<i64>
-    where 
+    where
         B: serde::Serialize,
     {
         self.add_qos1_typed(PacketType::Response, body, msg_id)
@@ -167,10 +174,8 @@ impl Xfer {
         }
     }
 
-
-
-    pub async fn flush<F, Fut>(&mut self, mut func: F) -> Result<()> 
-    where 
+    pub async fn flush<F, Fut>(&mut self, mut func: F) -> Result<()>
+    where
         F: FnMut(Packet) -> Fut,
         Fut: Future<Output = Result<()>>,
     {
@@ -189,9 +194,9 @@ impl Xfer {
     }
 
     async fn check_send_ack<F, Fut>(&mut self, mut func: F) -> Result<()>
-    where 
+    where
         F: FnMut(Packet) -> Fut,
-        Fut: Future<Output = Result<()>>, 
+        Fut: Future<Output = Result<()>>,
     {
         if self.sent_ack_sn < self.recv_sn {
             let packet_json = PacketRef::ack_json(self.recv_sn)?;
@@ -204,19 +209,19 @@ impl Xfer {
     }
 
     pub async fn send_push0<B, F, Fut>(&mut self, body: &B, func: F) -> Result<()>
-    where 
+    where
         B: serde::Serialize,
         F: FnMut(Packet) -> Fut,
-        Fut: Future<Output = Result<()>>, 
+        Fut: Future<Output = Result<()>>,
     {
         self.send_qos0(PacketType::Push0, body, func).await
     }
 
     async fn send_qos0<B, F, Fut>(&mut self, typ: PacketType, body: &B, mut func: F) -> Result<()>
-    where 
+    where
         B: serde::Serialize,
         F: FnMut(Packet) -> Fut,
-        Fut: Future<Output = Result<()>>, 
+        Fut: Future<Output = Result<()>>,
     {
         self.flush(&mut func).await?;
 
@@ -236,8 +241,8 @@ impl Xfer {
         Ok(())
     }
 
-    // pub async fn flush<C>(&mut self, conn: &mut C) -> Result<()> 
-    // where 
+    // pub async fn flush<C>(&mut self, conn: &mut C) -> Result<()>
+    // where
     //     C: ServerConnLike,
     // {
     //     // for packet in self.send_iter() {
@@ -254,8 +259,8 @@ impl Xfer {
     // }
 
     // async fn check_send_ack<C>(&mut self, conn: &mut C) -> Result<()>
-    // where 
-    //     C: ServerConnLike, 
+    // where
+    //     C: ServerConnLike,
     // {
     //     if self.sent_ack_sn < self.recv_sn {
     //         let packet_json = PacketRef::ack_json(self.recv_sn)?;
@@ -267,16 +272,16 @@ impl Xfer {
     // }
 
     // pub async fn send_push0<C, B>(&mut self, conn: &mut C, origin: &str, body: &B) -> Result<()>
-    // where 
-    //     C: ServerConnLike, 
+    // where
+    //     C: ServerConnLike,
     //     B: serde::Serialize,
     // {
     //     self.send_qos0(conn, origin, PacketType::Push0, body).await
     // }
 
     // async fn send_qos0<C, B>(&mut self, conn: &mut C, origin: &str, typ: PacketType, body: &B) -> Result<()>
-    // where 
-    //     C: ServerConnLike, 
+    // where
+    //     C: ServerConnLike,
     //     B: serde::Serialize,
     // {
     //     self.flush(conn).await?;
@@ -298,12 +303,10 @@ impl Xfer {
     // fn send_iter(&mut self) -> SendIter<'_> {
     //     SendIter {
     //         index: (self.sent_sn - self.recv_ack_sn) as usize,
-    //         owner: self, 
+    //         owner: self,
     //     }
     // }
-
 }
-
 
 pub struct SendIter<'a> {
     owner: &'a mut Xfer,
@@ -322,11 +325,11 @@ impl<'a> Iterator for SendIter<'a> {
             Some(v) => {
                 self.pending = true;
                 Some(v.1.clone())
-            },
+            }
             None => {
                 self.pending = false;
                 None
-            },
+            }
         }
     }
 }
@@ -343,17 +346,16 @@ impl<'a> Iterator for AckIter<'a> {
         if self.pending {
             self.owner.sent_ack_sn = self.owner.recv_sn;
             self.pending = false;
-            return None
+            return None;
         }
 
         if self.owner.sent_ack_sn < self.owner.recv_sn {
             let item = PacketRef::ack_json(self.owner.recv_sn);
             self.pending = true;
-            return Some(item)
+            return Some(item);
         }
 
         self.pending = false;
         None
     }
 }
-

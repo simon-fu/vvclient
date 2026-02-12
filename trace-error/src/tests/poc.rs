@@ -1,15 +1,11 @@
-
 use crate::tests::trace_result;
 use anyhow::Result;
-
-
 
 #[test]
 #[ignore = "poc"]
 fn print_chain() {
     println!("{:?}", foo_chain1());
 }
-
 
 #[trace_result]
 fn foo_chain1() -> Result<()> {
@@ -24,7 +20,7 @@ fn foo_chain2() -> Result<()> {
 
 #[trace_result]
 fn foo_chain3() -> Result<()> {
-    return foo_chain4()
+    return foo_chain4();
 }
 
 #[trace_result]
@@ -34,7 +30,7 @@ fn foo_chain4() -> Result<()> {
 
 #[trace_result]
 fn foo_chain5() -> Result<Result<()>> {
-    return Ok(foo_chain6()?) 
+    return Ok(foo_chain6()?);
 }
 
 #[trace_result]
@@ -60,7 +56,6 @@ fn chain_error2() -> Result<()> {
     Result::<()>::Err(anyhow::Error::msg("error msg2"))
 }
 
-
 #[cfg(test)]
 mod poc {
     use anyhow::{Context, Result};
@@ -85,19 +80,17 @@ mod poc {
         loop {
             num += 1;
             if num >= 10 {
-                return Ok(())
+                return Ok(());
             }
         }
     }
 
-
     // #[trace_error_macro::debug_traverse_fn]
     fn foo(arg: Result<()>) -> Result<()> {
-
         let func = move || {
             let _r1 = Result::<_>::Ok("111")?;
             let _r2 = Result::<_>::Ok(Result::<_>::Ok("222")?)?;
-            let _r3 = Result::<_>::Ok(Result::<_>::Ok("333"))?.with_context(||"333 context")?;
+            let _r3 = Result::<_>::Ok(Result::<_>::Ok("333"))?.with_context(|| "333 context")?;
             arg
         };
 
@@ -114,8 +107,5 @@ mod poc {
         }
     }
 }
-
-
-
 
 // error!("{}", trace_fmt!("phase_work failed", e));

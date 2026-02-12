@@ -1,11 +1,6 @@
-
-
 use std::collections::HashMap;
 
-use syn::{
-    Expr, Ident, spanned::Spanned
-};
-
+use syn::{Expr, Ident, spanned::Spanned};
 
 // macro_rules! dbgd {
 //     ($($arg:tt)* ) => (
@@ -13,9 +8,8 @@ use syn::{
 //     );
 // }
 
-
-pub type ReplaceFn = Box<dyn Fn(proc_macro2::Span, proc_macro2::TokenStream) -> proc_macro2::TokenStream>;
-
+pub type ReplaceFn =
+    Box<dyn Fn(proc_macro2::Span, proc_macro2::TokenStream) -> proc_macro2::TokenStream>;
 
 #[derive(Default)]
 pub struct MacroReplacer {
@@ -29,24 +23,20 @@ impl MacroReplacer {
 
     fn get_func(&self, ident: &Ident) -> Option<&ReplaceFn> {
         // 在 funcs 数量比较少时，遍历查找的开销要比 ident.to_string() 小
-        self.funcs
-            .iter()
-            .find(|x| ident == x.0)
-            .map(|x|x.1)
+        self.funcs.iter().find(|x| ident == x.0).map(|x| x.1)
     }
 
     pub fn try_replace(&self, mac: &syn::Macro, attrs: &Vec<syn::Attribute>) -> Option<Expr> {
-
         if let Some(ident) = mac.path.get_ident() {
             if let Some(func) = self.get_func(ident) {
-                return Some(self.replace(mac, func))
+                return Some(self.replace(mac, func));
             }
         }
 
         let (tokens, replaced) = self.replace_token(mac.tokens.clone());
-    
+
         if !replaced {
-            return None            
+            return None;
         }
 
         let mut new_mac = mac.clone();
@@ -57,7 +47,7 @@ impl MacroReplacer {
             mac: new_mac,
         });
 
-        return Some(new_expr)
+        return Some(new_expr);
     }
 
     fn replace(&self, mac: &syn::Macro, func: &ReplaceFn) -> Expr {
@@ -65,8 +55,8 @@ impl MacroReplacer {
         let tokens = func(span, mac.tokens.clone());
 
         // 把生成的 tokens 解析为 Expr，并替换原来的宏调用节点
-        let new_expr: Expr = syn::parse2(tokens)
-            .expect("failed to parse generated tokens into Expr");
+        let new_expr: Expr =
+            syn::parse2(tokens).expect("failed to parse generated tokens into Expr");
 
         new_expr
     }
@@ -85,7 +75,7 @@ impl MacroReplacer {
                     if yes {
                         replaced = true;
                     }
-                    
+
                     let mut new_group = proc_macro2::Group::new(g.delimiter(), new_stream);
                     new_group.set_span(span);
                     out.extend(std::iter::once(proc_macro2::TokenTree::Group(new_group)));
@@ -105,14 +95,16 @@ impl MacroReplacer {
                                 // now expect a Group
                                 if let Some(proc_macro2::TokenTree::Group(g)) = iter.next() {
                                     let r = self.get_func(&id);
-                                    if let Some(func) = r && p_char == '!' {
+                                    if let Some(func) = r
+                                        && p_char == '!'
+                                    {
                                         // This is fn_line! ( ... ) form; we will replace the whole sequence
                                         // Use the span of the group (or punct) so file!/line!/column! expand at right spot
                                         let span = g.span();
                                         let args = g.stream();
 
                                         let tokens = func(span, args);
-                                    
+
                                         // insert generated tokens (already TokenStream2)
                                         out.extend(tokens);
                                         replaced = true;
@@ -120,22 +112,34 @@ impl MacroReplacer {
                                     } else {
                                         // Not matching fn_ident, but we consumed ident, '!', group.
                                         // We must re-emit them (with group recursively processed)
-                                        out.extend(std::iter::once(proc_macro2::TokenTree::Ident(id)));
-                                        out.extend(std::iter::once(proc_macro2::TokenTree::Punct(proc_macro2::Punct::new('!', proc_macro2::Spacing::Alone))));
+                                        out.extend(std::iter::once(proc_macro2::TokenTree::Ident(
+                                            id,
+                                        )));
+                                        out.extend(std::iter::once(proc_macro2::TokenTree::Punct(
+                                            proc_macro2::Punct::new(
+                                                '!',
+                                                proc_macro2::Spacing::Alone,
+                                            ),
+                                        )));
                                         // process inner group recursively
-                                        let (new_stream, yes) = self.replace_token( g.stream());
+                                        let (new_stream, yes) = self.replace_token(g.stream());
                                         if yes {
                                             replaced = true;
                                         }
-                                        let mut new_group = proc_macro2::Group::new(g.delimiter(), new_stream);
+                                        let mut new_group =
+                                            proc_macro2::Group::new(g.delimiter(), new_stream);
                                         new_group.set_span(g.span());
-                                        out.extend(std::iter::once(proc_macro2::TokenTree::Group(new_group)));
+                                        out.extend(std::iter::once(proc_macro2::TokenTree::Group(
+                                            new_group,
+                                        )));
                                         continue;
                                     }
                                 } else {
                                     // There was '!' but not followed by Group (weird), re-emit id and '!'
                                     out.extend(std::iter::once(proc_macro2::TokenTree::Ident(id)));
-                                    out.extend(std::iter::once(proc_macro2::TokenTree::Punct(proc_macro2::Punct::new('!', proc_macro2::Spacing::Alone))));
+                                    out.extend(std::iter::once(proc_macro2::TokenTree::Punct(
+                                        proc_macro2::Punct::new('!', proc_macro2::Spacing::Alone),
+                                    )));
                                     continue;
                                 }
                             }
@@ -151,23 +155,18 @@ impl MacroReplacer {
         }
         (out, replaced)
     }
-
 }
 
-
-
-
-
-// fn replace_mac_with<F>(mac_name: &str, mac: &syn::Macro, attrs: &Vec<syn::Attribute>, func: &F) -> Option<Expr> 
-// where 
+// fn replace_mac_with<F>(mac_name: &str, mac: &syn::Macro, attrs: &Vec<syn::Attribute>, func: &F) -> Option<Expr>
+// where
 //     F: Fn(proc_macro2::Span, proc_macro2::TokenStream) -> proc_macro2::TokenStream,
 // {
 
 //     if !mac.path.is_ident(mac_name) {
 //         let (tokens, replaced) = replace_macro_token_with(mac_name, mac.tokens.clone(), func);
-    
+
 //         if !replaced {
-//             return None            
+//             return None
 //         }
 
 //         let mut new_mac = mac.clone();
@@ -192,9 +191,8 @@ impl MacroReplacer {
 //     return Some(new_expr);
 // }
 
-
-// fn replace_macro_token_with<F>(mac_name: &str, ts: proc_macro2::TokenStream, func: &F) -> (proc_macro2::TokenStream, bool) 
-// where 
+// fn replace_macro_token_with<F>(mac_name: &str, ts: proc_macro2::TokenStream, func: &F) -> (proc_macro2::TokenStream, bool)
+// where
 //     F: Fn(proc_macro2::Span, proc_macro2::TokenStream) -> proc_macro2::TokenStream,
 // {
 //     let mut out = proc_macro2::TokenStream::new();
@@ -210,7 +208,7 @@ impl MacroReplacer {
 //                 if yes {
 //                     replaced = true;
 //                 }
-                
+
 //                 let mut new_group = proc_macro2::Group::new(g.delimiter(), new_stream);
 //                 new_group.set_span(span);
 //                 out.extend(std::iter::once(proc_macro2::TokenTree::Group(new_group)));
@@ -236,7 +234,7 @@ impl MacroReplacer {
 //                                     let args = g.stream();
 
 //                                     let tokens = func(span, args);
-                                  
+
 //                                     // insert generated tokens (already TokenStream2)
 //                                     out.extend(tokens);
 //                                     replaced = true;
@@ -276,16 +274,14 @@ impl MacroReplacer {
 //     (out, replaced)
 // }
 
-
-
 // struct TryRewriter<T> {
 //     fn_name: Ident,
 //     tracer: T,
 //     enable_attach_line: bool,
 // }
 
-// impl<T> TryRewriter<T> 
-// where 
+// impl<T> TryRewriter<T>
+// where
 //     T: Tracable,
 // {
 //     fn attach_last_stmt(&mut self, last: Stmt, ) -> Stmt {
@@ -303,7 +299,7 @@ impl MacroReplacer {
 //     }
 
 //     fn try_attach_expr(&mut self, mut expr: Expr, span: proc_macro2::Span) -> Expr {
-        
+
 //         match &mut expr {
 //             Expr::Macro(mac) => {
 
@@ -322,18 +318,18 @@ impl MacroReplacer {
 //         if !self.enable_attach_line || is_ok_constructor(&expr) {
 //             return expr
 //         }
-        
+
 //         let new_expr = self.tracer.attach_line(&self.fn_name, &expr, span);
-        
+
 //         new_expr
-        
+
 //         // attach_expr(&expr, fn_name, func())
 //     }
 
 //     fn attach_mac(&mut self, mac: &mut syn::Macro) {
 
 //         if !Select::is_select_macro(&mac) {
-//             return 
+//             return
 //         }
 
 //         mac.tokens = self.attach_select_token(mac.tokens.clone());
@@ -356,9 +352,9 @@ impl MacroReplacer {
 
 //         // if !mac.path.is_ident("fn_line") {
 //         //     let (tokens, replaced) = replace_fn_line_token(&self.fn_name, mac.tokens.clone());
-        
+
 //         //     if replaced {
-                
+
 //         //         let mut new_mac = mac.clone();
 //         //         new_mac.tokens = tokens;
 
@@ -414,9 +410,8 @@ impl MacroReplacer {
 //     }
 // }
 
-
-// impl<T> Fold for TryRewriter<T> 
-// where 
+// impl<T> Fold for TryRewriter<T>
+// where
 //     T: Tracable,
 // {
 //     // override fold_expr_try to catch `expr?`
@@ -425,7 +420,7 @@ impl MacroReplacer {
 //         let folded_inner = syn::fold::fold_expr_try(self, i);
 
 //         let new_expr = self.try_attach_expr(
-//             *folded_inner.expr, 
+//             *folded_inner.expr,
 //             folded_inner.question_token.span(),
 //         );
 
@@ -435,11 +430,11 @@ impl MacroReplacer {
 //             attrs: folded_inner.attrs,
 //             expr: Box::new(new_expr),
 //             question_token: folded_inner.question_token,
-//         }       
+//         }
 //     }
 
 //     fn fold_expr_return(&mut self, i: ExprReturn) -> ExprReturn {
-        
+
 //         // dbgd!("fold_expr_return: inner_expr [{}]", quote!{#i});
 
 //         let folded = syn::fold::fold_expr_return(self, i);
@@ -484,14 +479,14 @@ impl MacroReplacer {
 //                     self.attach_mac(&mut mac.mac);
 
 //                     if let Some(new_expr) = self.replace_fn_line_expr_mac(&mac) {
-//                         *stmt = Stmt::Expr(new_expr, semi.clone()) 
+//                         *stmt = Stmt::Expr(new_expr, semi.clone())
 //                     }
 //                 }
 //                 Stmt::Macro(mac) => {
 //                     self.attach_mac(&mut mac.mac);
 
 //                     if let Some(new_expr) = self.replace_fn_line(&mac.mac, &mac.attrs) {
-//                         *stmt = Stmt::Expr(new_expr, mac.semi_token.clone()) 
+//                         *stmt = Stmt::Expr(new_expr, mac.semi_token.clone())
 //                     }
 //                 }
 //                 _ => {},
@@ -502,7 +497,6 @@ impl MacroReplacer {
 
 //     // other nodes are folded with defaults
 // }
-
 
 // /// 简单判断一个表达式是否是 `Ok(...)` 。
 // /// 匹配的形式包括 `Ok(...)`, `std::result::Result::Ok(...)` 等.
@@ -517,6 +511,3 @@ impl MacroReplacer {
 //     }
 //     false
 // }
-
-
-

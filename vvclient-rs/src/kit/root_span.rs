@@ -1,12 +1,10 @@
 const DEFAULT_ROOT_NAME: &'static str = "";
 
 pub fn init_root_span(root: tracing::Span) -> tracing::Span {
-    
     // let root = tracing::span!(parent: &root, tracing::Level::ERROR, DEFAULT_ROOT_NAME);
-    
+
     inner_span().get_or_init(|| root.into());
-    
-    
+
     let root = get_root_span_guard();
     // println!("root span is_none {}", root.as_ref().is_none());
     if root.as_ref().is_none() {
@@ -14,22 +12,17 @@ pub fn init_root_span(root: tracing::Span) -> tracing::Span {
         // These codes only for suppressing warning
         let _r = root_span_child!();
         let _r = root_span_child!("");
-        let _r = root_span_child!("", t="");
+        let _r = root_span_child!("", t = "");
         let _r = current_span_child!("never");
     }
 
     root.as_ref().clone()
-
 }
 
 // #[test]
 // fn test() {
 //     init_root_span(tracing::span!(parent: None, tracing::Level::ERROR, ROOT_NAME));
 // }
-
-
-
-
 
 // #[macro_export]
 macro_rules! root_span_child {
@@ -46,8 +39,7 @@ macro_rules! root_span_child {
     }
 }
 
-pub(crate) use root_span_child; 
-
+pub(crate) use root_span_child;
 
 // #[macro_export]
 macro_rules! current_span_child {
@@ -67,30 +59,25 @@ macro_rules! current_span_child {
 
 pub(crate) use current_span_child;
 
-
 pub(crate) fn get_root_span() -> tracing::Span {
     get_root_span_guard().as_ref().clone()
 }
-
 
 pub(crate) fn get_root_span_guard() -> RootSpanGuard<'static> {
     get_inner_span().guard()
 }
 
-
 fn get_inner_span() -> &'static RootSpan {
-    inner_span().get_or_init(||{
+    inner_span().get_or_init(|| {
         let span = tracing::span!(parent: None, tracing::Level::ERROR, DEFAULT_ROOT_NAME);
         span.into()
     })
 }
 
-
 fn inner_span() -> &'static std::sync::OnceLock<RootSpan> {
     static SPAN: std::sync::OnceLock<RootSpan> = std::sync::OnceLock::new();
     &SPAN
 }
-
 
 pub(crate) struct RootSpanGuard<'a>(&'a tracing::Span);
 impl<'a> AsRef<tracing::Span> for RootSpanGuard<'a> {
@@ -113,9 +100,6 @@ impl RootSpan {
     }
 }
 
-
-
-
 // struct RootSpan(arc_swap::ArcSwap<tracing::Span>);
 
 // impl RootSpan {
@@ -131,6 +115,3 @@ impl RootSpan {
 // }
 
 // type RootSpanGuard<'a> = arc_swap::Guard<std::sync::Arc<tracing::Span>>;
-
-
-

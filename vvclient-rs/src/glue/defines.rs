@@ -3,16 +3,18 @@ use core::fmt;
 use strum_macros::FromRepr;
 use trace_error::anyhow::trace_result;
 
-use crate::{client::defines::{ClientInfo as ClientInfoInner, ConnectionConfig, JoinAdvanceArgs, JoinConfig}, proto::{self, fmt_writer::JsonDisplay, mediasoup}};
+use crate::{
+    client::defines::{
+        ClientInfo as ClientInfoInner, ConnectionConfig, JoinAdvanceArgs, JoinConfig,
+    },
+    proto::{self, fmt_writer::JsonDisplay, mediasoup},
+};
 
-use anyhow::{Result, Error};
+use anyhow::{Error, Result};
 // use super::error::Error;
 // type Result<T, E = Error> = std::result::Result<T, E>;
 
-
-
-#[derive(uniffi::Record)]
-#[derive(Debug)]
+#[derive(uniffi::Record, Debug)]
 pub struct SignalConfig {
     pub user_id: String,
 
@@ -36,13 +38,13 @@ pub struct SignalConfig {
 
 impl Into<JoinConfig> for SignalConfig {
     fn into(self) -> JoinConfig {
-        let client_info = self.client_info.map(|ci| {
-            ClientInfoInner {
-                platform: ci.platform.map(Into::into),
-                sdk_name: ci.sdk_name.map(Into::into),
-                sdk_version: ci.sdk_version.map(Into::into),
-                device: ci.device.map(|m| m.into_iter().map(|(k, v)| (k.into(), v.into())).collect()),
-            }
+        let client_info = self.client_info.map(|ci| ClientInfoInner {
+            platform: ci.platform.map(Into::into),
+            sdk_name: ci.sdk_name.map(Into::into),
+            sdk_version: ci.sdk_version.map(Into::into),
+            device: ci
+                .device
+                .map(|m| m.into_iter().map(|(k, v)| (k.into(), v.into())).collect()),
         });
         JoinConfig {
             user_id: self.user_id.into(),
@@ -53,10 +55,18 @@ impl Into<JoinConfig> for SignalConfig {
                     ignore_server_cert: self.ignore_server_cert,
                     heartbeat_enable: self.heartbeat_enable,
                     heartbeat_interval: self.heartbeat_interval_ms.and_then(|v| {
-                        if v > 0 { Some(std::time::Duration::from_millis(v as u64)) } else { None }
+                        if v > 0 {
+                            Some(std::time::Duration::from_millis(v as u64))
+                        } else {
+                            None
+                        }
                     }),
                     heartbeat_timeout: self.heartbeat_timeout_ms.and_then(|v| {
-                        if v > 0 { Some(std::time::Duration::from_millis(v as u64)) } else { None }
+                        if v > 0 {
+                            Some(std::time::Duration::from_millis(v as u64))
+                        } else {
+                            None
+                        }
                     }),
                     ..Default::default()
                 },
@@ -68,8 +78,7 @@ impl Into<JoinConfig> for SignalConfig {
     }
 }
 
-#[derive(uniffi::Record)]
-#[derive(Debug, Clone)]
+#[derive(uniffi::Record, Debug, Clone)]
 pub struct ClientInfo {
     pub platform: Option<String>,
     pub sdk_name: Option<String>,
@@ -78,7 +87,6 @@ pub struct ClientInfo {
 }
 
 pub trait ToBody {
-
     fn to_body_typed(&self) -> Result<impl serde::Serialize>;
 
     #[trace_result]
@@ -87,17 +95,15 @@ pub trait ToBody {
         Ok(body)
     }
 
-
     #[trace_result]
     fn to_body(&self) -> Result<impl serde::Serialize + fmt::Display> {
         Ok(JsonDisplay(self.to_body_typed()?))
     }
 }
 
-#[derive(uniffi::Record)]
-#[derive(Debug)]
+#[derive(uniffi::Record, Debug)]
 pub struct Status {
-    pub code :i32,
+    pub code: i32,
     pub reason: String,
 }
 
@@ -134,17 +140,16 @@ impl From<Status> for proto::Status {
     }
 }
 
-#[derive(uniffi::Enum)]
-#[derive( Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, FromRepr)]
+#[derive(uniffi::Enum, Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, FromRepr)]
 #[repr(i32)]
 pub enum StreamType {
     Camera = 1,
     Mic = 2,
-    Screen = 3, 
+    Screen = 3,
 }
 
 impl StreamType {
-    pub fn from_value(value: i32) -> Result<Self>{
+    pub fn from_value(value: i32) -> Result<Self> {
         Ok(proto::StreamType::from_value(value)?.into())
     }
 
@@ -152,7 +157,7 @@ impl StreamType {
         *self as i32
     }
 
-    pub fn value_str(value: i32) -> Result<&'static str>{
+    pub fn value_str(value: i32) -> Result<&'static str> {
         proto::StreamType::value_str(value)
     }
 
@@ -160,8 +165,6 @@ impl StreamType {
         proto::StreamType::from(*self).as_str()
     }
 }
-
-
 
 impl From<proto::StreamType> for StreamType {
     fn from(value: proto::StreamType) -> Self {
@@ -183,8 +186,7 @@ impl From<StreamType> for proto::StreamType {
     }
 }
 
-#[derive(uniffi::Record)]
-#[derive(Debug)]
+#[derive(uniffi::Record, Debug)]
 pub struct TreeNode {
     pub path: String,
     pub value: Option<String>,
@@ -201,16 +203,14 @@ impl From<proto::TreeState> for TreeNode {
     }
 }
 
-#[derive(uniffi::Record)]
-#[derive(Debug)]
+#[derive(uniffi::Record, Debug)]
 pub struct ChatArgs {
     pub from: String,
     pub to: String,
     pub body: String,
 }
 
-#[derive(uniffi::Record)]
-#[derive(Debug)]
+#[derive(uniffi::Record, Debug)]
 pub struct OnCreateXResponse {
     /// Transport Id
     pub xid: ::prost::alloc::string::String,
@@ -234,8 +234,8 @@ impl TryFrom<proto::response::ResponseType> for OnCreateXResponse {
             proto::response::ResponseType::CreateX(v) => v,
             _ => {
                 let e = anyhow::anyhow!("Unexpect response of [{}], {response:?}", stringify!(Sub));
-                return Err(e)
-            },
+                return Err(e);
+            }
         };
 
         Self::try_from(value)
@@ -245,39 +245,44 @@ impl TryFrom<proto::response::ResponseType> for OnCreateXResponse {
 impl TryFrom<proto::CreateWebrtcTransportResponse> for OnCreateXResponse {
     type Error = Error;
 
-    fn try_from(value: proto::CreateWebrtcTransportResponse) -> std::result::Result<Self, Self::Error> {
+    fn try_from(
+        value: proto::CreateWebrtcTransportResponse,
+    ) -> std::result::Result<Self, Self::Error> {
         let ice_param = match &value.ice_param {
             Some(v) => {
                 let j = serde_json::to_string(v)?;
                 Some(j)
-            },
+            }
             None => None,
         };
 
-        let ice_candidates = serde_json::to_string(&proto::IterSer(value.ice_candidates.iter().map(|x|proto::IceCandidateSer::from(x))))?;
+        let ice_candidates = serde_json::to_string(&proto::IterSer(
+            value
+                .ice_candidates
+                .iter()
+                .map(|x| proto::IceCandidateSer::from(x)),
+        ))?;
         // let ice_candidates = serde_json::to_string(&value.ice_candidates)?;
 
         let dtls = match &value.dtls {
             Some(v) => {
                 let j = serde_json::to_string(v)?;
                 Some(j)
-            },
+            }
             None => None,
         };
 
         Ok(Self {
-            xid: value.xid, 
-            ice_param, 
-            ice_candidates, 
+            xid: value.xid,
+            ice_param,
+            ice_candidates,
             dtls,
         })
     }
 }
 
-#[derive(uniffi::Record)]
-#[derive(Debug)]
+#[derive(uniffi::Record, Debug)]
 pub struct ConnXCall {
-
     /// Room Id
     pub xid: String,
 
@@ -286,31 +291,26 @@ pub struct ConnXCall {
 }
 
 impl ToBody for ConnXCall {
-
     #[trace_result]
     fn to_body_typed(&self) -> Result<impl serde::Serialize> {
         let dtls = match &self.dtls {
             Some(v) => {
                 let typed: mediasoup::prelude::DtlsParameters = serde_json::from_str(v)?;
                 Some(typed)
-            },
+            }
             None => None,
         };
 
         Ok(proto::ConnectWebrtcTransportRequestSer {
-                xid: &self.xid,
-                dtls,
-            }.into_msg())
+            xid: &self.xid,
+            dtls,
+        }
+        .into_msg())
     }
 }
 
-
-
-#[derive(uniffi::Record)]
-#[derive(Debug)]
-pub struct ConnXReturn {
-
-}
+#[derive(uniffi::Record, Debug)]
+pub struct ConnXReturn {}
 
 impl TryFrom<proto::response::ResponseType> for ConnXReturn {
     type Error = Error;
@@ -318,23 +318,17 @@ impl TryFrom<proto::response::ResponseType> for ConnXReturn {
     #[trace_result]
     fn try_from(response: proto::response::ResponseType) -> std::result::Result<Self, Self::Error> {
         match response {
-            proto::response::ResponseType::ConnX(_rsp) => {
-                Result::<_>::Ok(Self {
-
-                })
-            }
+            proto::response::ResponseType::ConnX(_rsp) => Result::<_>::Ok(Self {}),
             _ => {
-                let e = anyhow::anyhow!("Unexpect response of [{}], {response:?}", stringify!(ConnX));
-                return Err(e)
-            },
+                let e =
+                    anyhow::anyhow!("Unexpect response of [{}], {response:?}", stringify!(ConnX));
+                return Err(e);
+            }
         }
     }
 }
 
-
-
-#[derive(uniffi::Record)]
-#[derive(Debug)]
+#[derive(uniffi::Record, Debug)]
 pub struct PubCall {
     pub x_id: String,
     pub stype: StreamType,
@@ -343,41 +337,38 @@ pub struct PubCall {
 }
 
 impl ToBody for PubCall {
-
     #[trace_result]
     fn to_body_typed(&self) -> Result<impl serde::Serialize> {
         let rtp = match &self.rtp {
             Some(v) => {
                 let typed: mediasoup::prelude::RtpParameters = serde_json::from_str(v)?;
                 Some(typed)
-            },
+            }
             None => None,
         };
 
         let body = proto::PublishRequestSer {
-                room_id: "".into(),
-                
-                xid: &self.x_id,
-                
-                stream_id: self.stype.as_str(),
+            room_id: "".into(),
 
-                stype: self.stype.value(),
+            xid: &self.x_id,
 
-                rtp,
+            stream_id: self.stype.as_str(),
 
-                audio_type: 0,
+            stype: self.stype.value(),
 
-                muted: self.muted,
-                
-            }.into_msg();
+            rtp,
+
+            audio_type: 0,
+
+            muted: self.muted,
+        }
+        .into_msg();
 
         Ok(body)
     }
 }
 
-
-#[derive(uniffi::Record)]
-#[derive(Debug)]
+#[derive(uniffi::Record, Debug)]
 pub struct PubReturn {
     pub producer_id: String,
 }
@@ -388,50 +379,40 @@ impl TryFrom<proto::response::ResponseType> for PubReturn {
     #[trace_result]
     fn try_from(response: proto::response::ResponseType) -> std::result::Result<Self, Self::Error> {
         match response {
-            proto::response::ResponseType::Pub(rsp) => {
-                Result::<_>::Ok(Self {
-                    producer_id: rsp.producer_id,
-                })
-            }
+            proto::response::ResponseType::Pub(rsp) => Result::<_>::Ok(Self {
+                producer_id: rsp.producer_id,
+            }),
             _ => {
                 let e = anyhow::anyhow!("Unexpect response of [{}], {response:?}", stringify!(Pub));
-                return Err(e)
-            },
+                return Err(e);
+            }
         }
     }
 }
 
-
-#[derive(uniffi::Record)]
-#[derive(Debug)]
+#[derive(uniffi::Record, Debug)]
 pub struct UPubCall {
     pub stype: StreamType,
 }
 
 impl ToBody for UPubCall {
-
     #[trace_result]
     fn to_body_typed(&self) -> Result<impl serde::Serialize> {
-
         let body = proto::UnPublishRequestSer {
-                room_id: "".into(),
+            room_id: "".into(),
 
-                producer_id: None,
-                
-                stream_id: Some(self.stype.as_str()),
-                
-            }.into_msg();
+            producer_id: None,
+
+            stream_id: Some(self.stype.as_str()),
+        }
+        .into_msg();
 
         Ok(body)
     }
 }
 
-
-#[derive(uniffi::Record)]
-#[derive(Debug)]
-pub struct UPubReturn {
-    
-}
+#[derive(uniffi::Record, Debug)]
+pub struct UPubReturn {}
 
 impl TryFrom<proto::response::ResponseType> for UPubReturn {
     type Error = Error;
@@ -439,25 +420,18 @@ impl TryFrom<proto::response::ResponseType> for UPubReturn {
     #[trace_result]
     fn try_from(response: proto::response::ResponseType) -> std::result::Result<Self, Self::Error> {
         match response {
-            proto::response::ResponseType::UPub(_rsp) => {
-                Result::<_>::Ok(Self {
-                    
-                })
-            }
+            proto::response::ResponseType::UPub(_rsp) => Result::<_>::Ok(Self {}),
             _ => {
-                let e = anyhow::anyhow!("Unexpect response of [{}], {response:?}", stringify!(UPub));
-                return Err(e)
-            },
+                let e =
+                    anyhow::anyhow!("Unexpect response of [{}], {response:?}", stringify!(UPub));
+                return Err(e);
+            }
         }
     }
 }
 
-
-
-#[derive(uniffi::Record)]
-#[derive(Debug)]
+#[derive(uniffi::Record, Debug)]
 pub struct MuteCall {
-    
     pub stype: StreamType,
 
     pub muted: bool,
@@ -467,20 +441,18 @@ impl ToBody for MuteCall {
     #[trace_result]
     fn to_body_typed(&self) -> Result<impl serde::Serialize> {
         let body = proto::MuteRequestSer {
-                room_id: "",
-                producer_id: None,
-                stream_id: Some(self.stype.as_str()),
-                muted: self.muted,
-            }.into_msg();
+            room_id: "",
+            producer_id: None,
+            stream_id: Some(self.stype.as_str()),
+            muted: self.muted,
+        }
+        .into_msg();
         Ok(body)
     }
 }
 
-#[derive(uniffi::Record)]
-#[derive(Debug)]
-pub struct MuteReturn {
-
-}
+#[derive(uniffi::Record, Debug)]
+pub struct MuteReturn {}
 
 impl TryFrom<proto::response::ResponseType> for MuteReturn {
     type Error = Error;
@@ -488,23 +460,17 @@ impl TryFrom<proto::response::ResponseType> for MuteReturn {
     #[trace_result]
     fn try_from(response: proto::response::ResponseType) -> std::result::Result<Self, Self::Error> {
         match response {
-            proto::response::ResponseType::Mute(_rsp) => {
-                Result::<_>::Ok(Self {
-                    
-                })
-            }
+            proto::response::ResponseType::Mute(_rsp) => Result::<_>::Ok(Self {}),
             _ => {
-                let e = anyhow::anyhow!("Unexpect response of [{}], {response:?}", stringify!(Mute));
-                return Err(e)
-            },
+                let e =
+                    anyhow::anyhow!("Unexpect response of [{}], {response:?}", stringify!(Mute));
+                return Err(e);
+            }
         }
     }
 }
 
-
-
-#[derive(uniffi::Record)]
-#[derive(Debug)]
+#[derive(uniffi::Record, Debug)]
 pub struct SubCall {
     pub user_id: String,
     pub stype: StreamType,
@@ -516,16 +482,13 @@ pub struct SubCall {
 //     fn to_body_typed(&self) -> Result<impl serde::Serialize> {
 //         let body = proto::SubscribeRequestSer {
 
-                
 //             }.into_msg();
 
 //         Ok(body)
 //     }
 // }
 
-
-#[derive(uniffi::Record)]
-#[derive(Debug)]
+#[derive(uniffi::Record, Debug)]
 pub struct SubReturn {
     pub x_id: String,
 
@@ -540,21 +503,24 @@ pub struct SubReturn {
 }
 
 impl SubReturn {
-    pub fn try_new(x_id: String, producer_id: String, stream_id: String, response: proto::response::ResponseType) -> Result<Self> {
+    pub fn try_new(
+        x_id: String,
+        producer_id: String,
+        stream_id: String,
+        response: proto::response::ResponseType,
+    ) -> Result<Self> {
         match response {
-            proto::response::ResponseType::Sub(rsp) => {
-                Result::<_>::Ok(Self {
-                    consumer_id: rsp.consumer_id,
-                    rtp: rsp.rtp.map(|x|serde_json::to_string(&x)).transpose()?,
-                    x_id, 
-                    producer_id,
-                    stream_id,
-                })
-            }
+            proto::response::ResponseType::Sub(rsp) => Result::<_>::Ok(Self {
+                consumer_id: rsp.consumer_id,
+                rtp: rsp.rtp.map(|x| serde_json::to_string(&x)).transpose()?,
+                x_id,
+                producer_id,
+                stream_id,
+            }),
             _ => {
                 let e = anyhow::anyhow!("Unexpect response of [{}], {response:?}", stringify!(Sub));
-                return Err(e)
-            },
+                return Err(e);
+            }
         }
     }
 }
@@ -579,31 +545,23 @@ impl SubReturn {
 //     }
 // }
 
-
-#[derive(uniffi::Record)]
-#[derive(Debug)]
+#[derive(uniffi::Record, Debug)]
 pub struct UnsubCall {
     pub consumer_id: String,
 }
 
-#[derive(uniffi::Record)]
-#[derive(Debug)]
-pub struct UnsubReturn {
-    
-}
+#[derive(uniffi::Record, Debug)]
+pub struct UnsubReturn {}
 
 impl UnsubReturn {
     pub fn try_new(response: proto::response::ResponseType) -> Result<Self> {
         match response {
-            proto::response::ResponseType::USub(_rsp) => {
-                Result::<_>::Ok(Self {
-                    
-                })
-            }
+            proto::response::ResponseType::USub(_rsp) => Result::<_>::Ok(Self {}),
             _ => {
-                let e = anyhow::anyhow!("Unexpect response of [{}], {response:?}", stringify!(USub));
-                return Err(e)
-            },
+                let e =
+                    anyhow::anyhow!("Unexpect response of [{}], {response:?}", stringify!(USub));
+                return Err(e);
+            }
         }
     }
 }

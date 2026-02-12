@@ -1,5 +1,3 @@
-
-
 use std::collections::HashMap;
 
 use crate::proto::{fmt_writer::JsonDisplay, mediasoup};
@@ -10,18 +8,17 @@ use super::UpdateTreeRequest;
 #[derive(serde::Serialize, Clone, PartialEq, Debug)]
 pub struct PacketSer<B> {
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub typ: Option<i32>,  // see PacketType
+    pub typ: Option<i32>, // see PacketType
 
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub sn: Option<i64>,  // seq number
+    pub sn: Option<i64>, // seq number
 
     #[serde(skip_serializing_if = "Option::is_none")]
     pub body: Option<B>,
 
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub ack: Option<i64>,  // ack sn
+    pub ack: Option<i64>, // ack sn
 }
-
 
 #[derive(serde::Serialize, Clone, PartialEq, Debug)]
 pub struct ClientRequestSer<T> {
@@ -31,7 +28,6 @@ pub struct ClientRequestSer<T> {
 #[derive(serde::Serialize, Clone, PartialEq, Debug)]
 pub enum OpenTypeSer<T> {
     Open(T),
-
     // Reconn(super::ReconnectRequest),
 
     // Close(super::CloseSessionRequest),
@@ -65,11 +61,9 @@ pub enum OpenTypeSer<T> {
     // Ack(super::PushAck),
 }
 
-
-
 #[derive(serde::Serialize, Clone, PartialEq, Debug)]
-pub struct OpenSessionRequestSer<'a, UTREE, DEVICE> 
-// where 
+pub struct OpenSessionRequestSer<'a, UTREE, DEVICE>
+// where
 //     // UTREE: Iterator<Item = UpdateTreeRequestRef<'a>> + 'a,
 //     UTREE: serde::Serialize,
 {
@@ -87,19 +81,18 @@ pub struct OpenSessionRequestSer<'a, UTREE, DEVICE>
     pub user_ext: Option<&'a str>,
 
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub user_tree: Option< UTREE >,
+    pub user_tree: Option<UTREE>,
 
     #[serde(skip_serializing_if = "Option::is_none")]
     pub batch: Option<bool>,
-
     // #[serde(skip_serializing_if = "Option::is_none")]
-    // pub create_x_requests: Option<XREQS>,  
+    // pub create_x_requests: Option<XREQS>,
 }
 
 impl<'a, UTREE, DEVICE> OpenSessionRequestSer<'a, UTREE, DEVICE> {
     fn into_msg(self) -> ClientRequestSer<OpenTypeSer<Self>> {
         ClientRequestSer {
-            typ: OpenTypeSer::Open(self)
+            typ: OpenTypeSer::Open(self),
         }
     }
 
@@ -109,7 +102,7 @@ impl<'a, UTREE, DEVICE> OpenSessionRequestSer<'a, UTREE, DEVICE> {
 }
 
 #[derive(serde::Serialize, Clone, PartialEq, Debug)]
-pub struct ClientInfoSer<'a, DEVICE=HashMap<&'a str, &'a str>> {
+pub struct ClientInfoSer<'a, DEVICE = HashMap<&'a str, &'a str>> {
     /// 客户端平台类型，如 Android / iOS / Windows
     #[serde(skip_serializing_if = "Option::is_none")]
     pub platform: Option<&'a str>,
@@ -131,17 +124,13 @@ pub struct SdkInfoSer<'a> {
     pub version: Option<&'a str>,
 }
 
-
 #[derive(serde::Serialize, Clone, PartialEq, Debug)]
 pub enum ReconnTypeSer<T> {
     Reconn(T),
 }
 
-
-
 #[derive(serde::Serialize, Clone, PartialEq, Debug)]
-pub struct ReconnectRequestSer<'a> 
-{
+pub struct ReconnectRequestSer<'a> {
     pub session_id: &'a str,
 
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -155,13 +144,13 @@ pub struct ReconnectRequestSer<'a>
     pub last_success_seq: i64,
 
     /// 标志， 固定为 20250901
-    pub magic: i32, 
+    pub magic: i32,
 }
 
 impl<'a> ReconnectRequestSer<'a> {
     fn into_msg(self) -> ClientRequestSer<ReconnTypeSer<Self>> {
         ClientRequestSer {
-            typ: ReconnTypeSer::Reconn(self)
+            typ: ReconnTypeSer::Reconn(self),
         }
     }
 
@@ -169,7 +158,6 @@ impl<'a> ReconnectRequestSer<'a> {
         JsonDisplay(self.into_msg())
     }
 }
-
 
 #[derive(serde::Serialize, Clone, PartialEq, Debug)]
 pub struct UpdateTreeRequestSer<'a> {
@@ -197,7 +185,6 @@ impl<'a> From<&'a UpdateTreeRequest> for UpdateTreeRequestSer<'a> {
 #[derive(serde::Serialize, Clone, PartialEq, Debug)]
 #[serde(rename_all = "camelCase")]
 pub struct CreateWebrtcTransportRequestSer<'a, DTLS> {
-
     /// Room Id
     pub room_id: &'a str,
 
@@ -215,7 +202,7 @@ pub struct CreateWebrtcTransportRequestSer<'a, DTLS> {
 impl<'a, DTLS> CreateWebrtcTransportRequestSer<'a, DTLS> {
     pub fn into_msg(self) -> ClientRequestSer<CreateXTypeSer<Self>> {
         ClientRequestSer {
-            typ: CreateXTypeSer::CreateX(self)
+            typ: CreateXTypeSer::CreateX(self),
         }
     }
 
@@ -228,7 +215,6 @@ impl<'a, DTLS> CreateWebrtcTransportRequestSer<'a, DTLS> {
 pub enum CreateXTypeSer<T> {
     CreateX(T),
 }
-
 
 #[derive(serde::Serialize, Clone, PartialEq, Debug)]
 #[serde(rename_all = "camelCase")]
@@ -244,7 +230,7 @@ pub struct ConnectWebrtcTransportRequestSer<'a, DTLS> {
 impl<'a, DTLS> ConnectWebrtcTransportRequestSer<'a, DTLS> {
     pub fn into_msg(self) -> ClientRequestSer<ConnXTypeSer<Self>> {
         ClientRequestSer {
-            typ: ConnXTypeSer::ConnX(self)
+            typ: ConnXTypeSer::ConnX(self),
         }
     }
 }
@@ -289,18 +275,17 @@ impl<'a> From<&'a mediasoup::prelude::IceCandidate> for IceCandidateSer<'a> {
     }
 }
 
-
 #[derive(serde::Serialize, serde::Deserialize, Clone, PartialEq, Debug)]
 #[serde(rename_all = "camelCase")]
 pub struct PublishRequestSer<'a, RTP> {
     /// Room Id
     pub room_id: &'a str,
-    
+
     /// 发送通道 Transport Id
     pub xid: &'a str,
-    
+
     pub stream_id: &'a str,
-    
+
     /// 媒体类型, 见 MediaKind
     // pub kind: i32,
 
@@ -316,13 +301,12 @@ pub struct PublishRequestSer<'a, RTP> {
 
     #[serde(skip_serializing_if = "Option::is_none")]
     pub muted: Option<bool>,
-
 }
 
 impl<'a, RTP> PublishRequestSer<'a, RTP> {
     pub fn into_msg(self) -> ClientRequestSer<PublishTypeSer<Self>> {
         ClientRequestSer {
-            typ: PublishTypeSer::Pub(self)
+            typ: PublishTypeSer::Pub(self),
         }
     }
 }
@@ -345,13 +329,12 @@ pub struct UnPublishRequestSer<'a> {
     /// 媒体流 Id （和生产者 Id 二选一）
     #[serde(skip_serializing_if = "Option::is_none")]
     pub stream_id: Option<&'a str>,
-
 }
 
 impl<'a> UnPublishRequestSer<'a> {
     pub fn into_msg(self) -> ClientRequestSer<UnPublishTypeSer<Self>> {
         ClientRequestSer {
-            typ: UnPublishTypeSer::UPub(self)
+            typ: UnPublishTypeSer::UPub(self),
         }
     }
 }
@@ -361,12 +344,9 @@ pub enum UnPublishTypeSer<T> {
     UPub(T),
 }
 
-
-
 #[derive(serde::Serialize, Clone, PartialEq, Debug)]
 #[serde(rename_all = "camelCase")]
 pub struct MuteRequestSer<'a> {
-    
     pub room_id: &'a str,
 
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -378,11 +358,10 @@ pub struct MuteRequestSer<'a> {
     pub muted: bool,
 }
 
-
 impl<'a> MuteRequestSer<'a> {
     pub fn into_msg(self) -> ClientRequestSer<MuteTypeSer<Self>> {
         ClientRequestSer {
-            typ: MuteTypeSer::Mute(self)
+            typ: MuteTypeSer::Mute(self),
         }
     }
 }
@@ -391,7 +370,6 @@ impl<'a> MuteRequestSer<'a> {
 pub enum MuteTypeSer<T> {
     Mute(T),
 }
-
 
 #[derive(serde::Serialize, Clone, PartialEq, Debug)]
 #[serde(rename_all = "camelCase")]
@@ -416,7 +394,7 @@ pub struct SubscribeRequestSer<'a> {
 impl<'a> SubscribeRequestSer<'a> {
     pub fn into_msg(self) -> ClientRequestSer<SubTypeSer<Self>> {
         ClientRequestSer {
-            typ: SubTypeSer::Sub(self)
+            typ: SubTypeSer::Sub(self),
         }
     }
 
@@ -437,13 +415,12 @@ pub struct UnsubscribeRequestSer<'a> {
 
     /// 消费者 Id
     pub consumer_id: &'a str,
-
 }
 
 impl<'a> UnsubscribeRequestSer<'a> {
     pub fn into_msg(self) -> ClientRequestSer<USubTypeSer<Self>> {
         ClientRequestSer {
-            typ: USubTypeSer::USub(self)
+            typ: USubTypeSer::USub(self),
         }
     }
 
@@ -457,17 +434,14 @@ pub enum USubTypeSer<T> {
     USub(T),
 }
 
-
 #[derive(serde::Serialize, Clone, PartialEq, Debug)]
 #[serde(rename_all = "camelCase")]
-pub struct BatchEndRequestSer {
-
-}
+pub struct BatchEndRequestSer {}
 
 impl BatchEndRequestSer {
     pub fn into_msg(self) -> ClientRequestSer<BatchEndTypeSer<Self>> {
         ClientRequestSer {
-            typ: BatchEndTypeSer::BEnd(self)
+            typ: BatchEndTypeSer::BEnd(self),
         }
     }
 
@@ -483,14 +457,12 @@ pub enum BatchEndTypeSer<T> {
 
 #[derive(serde::Serialize, Clone, PartialEq, Debug)]
 #[serde(rename_all = "camelCase")]
-pub struct HeartbeatRequestSer {
-
-}
+pub struct HeartbeatRequestSer {}
 
 impl HeartbeatRequestSer {
     pub fn into_msg(self) -> ClientRequestSer<HeartbeatTypeSer<Self>> {
         ClientRequestSer {
-            typ: HeartbeatTypeSer::HB(self)
+            typ: HeartbeatTypeSer::HB(self),
         }
     }
 
@@ -504,10 +476,8 @@ pub enum HeartbeatTypeSer<T> {
     HB(T),
 }
 
-
 #[derive(serde::Serialize, Clone, PartialEq, Debug)]
 pub struct CloseSessionRequestSer<'a> {
-
     /// Room Id
     pub room_id: &'a str,
 
@@ -518,7 +488,7 @@ pub struct CloseSessionRequestSer<'a> {
 impl<'a> CloseSessionRequestSer<'a> {
     pub fn into_msg(self) -> ClientRequestSer<CloseSessionTypeSer<Self>> {
         ClientRequestSer {
-            typ: CloseSessionTypeSer::Close(self)
+            typ: CloseSessionTypeSer::Close(self),
         }
     }
 
@@ -532,14 +502,12 @@ pub enum CloseSessionTypeSer<T> {
     Close(T),
 }
 
-
-
 pub trait IntoIterSerialize {
     fn into_iter_ser(self) -> impl serde::Serialize;
 }
 
-impl<I, O> IntoIterSerialize for I 
-where 
+impl<I, O> IntoIterSerialize for I
+where
     I: Iterator<Item = O> + Clone,
     O: serde::Serialize,
 {
@@ -548,18 +516,17 @@ where
     }
 }
 
-
 #[derive(Clone, PartialEq, Debug)]
 pub struct IterSer<I>(pub I);
 
-impl<I, O> serde::Serialize for IterSer<I> 
-where 
+impl<I, O> serde::Serialize for IterSer<I>
+where
     I: Iterator<Item = O> + Clone,
     O: serde::Serialize,
 {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
-        S: serde::Serializer 
+        S: serde::Serializer,
     {
         use serde::ser::SerializeSeq;
 
@@ -591,12 +558,12 @@ mod tests {
     fn test() {
         let user_tree = Some(vec![
             UpdateTreeRequest {
-                path: Some("foo/bar".into()), 
+                path: Some("foo/bar".into()),
                 value: Some("value-123".into()),
                 prune: None,
             },
             UpdateTreeRequest {
-                path: Some("root/child".into()), 
+                path: Some("root/child".into()),
                 value: Some("child-xyz".into()),
                 prune: Some(true),
             },
@@ -606,12 +573,11 @@ mod tests {
             user_id: "John",
             room_id: "Room1",
             user_ext: Some("ext-abc"),
-            user_tree: user_tree
-                .as_ref()
-                .map(|x|
-                    x.iter().map(|y|UpdateTreeRequestSer::from(y))
+            user_tree: user_tree.as_ref().map(|x| {
+                x.iter()
+                    .map(|y| UpdateTreeRequestSer::from(y))
                     .into_iter_ser()
-                ),
+            }),
             batch: None,
             client_info: Option::<ClientInfoSer<'static>>::None,
             token: None,
@@ -620,9 +586,9 @@ mod tests {
 
         let packet = PacketSer {
             typ: Some(PacketType::Request.as_num()),
-            sn: Some(1), 
+            sn: Some(1),
             body: Some(req.into_body()),
-            ack: None, 
+            ack: None,
         };
 
         let json = serde_json::to_string(&packet).unwrap();
@@ -631,6 +597,5 @@ mod tests {
             json,
             r#"{"typ":3,"sn":1,"body":"{\"typ\":{\"Open\":{\"user_id\":\"John\",\"room_id\":\"Room1\",\"user_ext\":\"ext-abc\",\"user_tree\":[{\"path\":\"foo/bar\",\"value\":\"value-123\"},{\"path\":\"root/child\",\"value\":\"child-xyz\",\"prune\":true}]}}}"}"#,
         );
-
     }
 }
