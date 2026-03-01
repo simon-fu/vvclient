@@ -6,7 +6,10 @@ use anyhow::{Context as _, Result};
 use tokio::net::TcpStream;
 use tokio_tungstenite::{
     Connector, MaybeTlsStream, WebSocketStream, connect_async, connect_async_tls_with_config,
-    tungstenite::{Message as WsMessage, Utf8Bytes, http, protocol::WebSocketConfig},
+    tungstenite::{
+        Message as WsMessage, Utf8Bytes, client::IntoClientRequest, http,
+        protocol::WebSocketConfig,
+    },
 };
 use trace_error::anyhow::trace_result;
 use tracing::debug;
@@ -201,11 +204,14 @@ pub type WsStream = WebSocketStream<MaybeTlsStream<TcpStream>>;
 pub type Packet = Utf8Bytes;
 
 fn build_ws_request(url: &str, headers: &[(&str, &str)]) -> Result<http::Request<()>> {
-    let mut builder = http::Request::builder().uri(url);
+    let mut req = url.into_client_request()?;
     for (k, v) in headers {
-        builder = builder.header(*k, *v);
+        req.headers_mut().insert(
+            http::header::HeaderName::from_bytes(k.as_bytes())?,
+            http::header::HeaderValue::from_str(v)?,
+        );
     }
-    Ok(builder.body(())?)
+    Ok(req.map(|_| ()))
 }
 
 #[cfg(test)]
@@ -218,5 +224,14 @@ mod tests {
             build_ws_request("wss://127.0.0.1:11443/ws", &[("X-VV-Request-Type", "upload.file")]).unwrap();
 
         assert_eq!(req.headers()["X-VV-Request-Type"], "upload.file");
+    }
+
+    #[test]
+    fn build_ws_request_preserves_websocket_handshake_headers() {
+        let req = build_ws_request("wss://127.0.0.1:11443/ws", &[]).unwrap();
+        assert!(req.headers().contains_key("Sec-WebSocket-Key"));
+        assert!(req.headers().contains_key("Sec-WebSocket-Version"));
+        assert!(req.headers().contains_key("Connection"));
+        assert!(req.headers().contains_key("Upgrade"));
     }
 }
