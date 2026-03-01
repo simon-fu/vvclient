@@ -797,6 +797,7 @@ impl<T: Types> Worker<T> {
                 None
             };
             proto::ClientInfoSer {
+                client_id: ci.client_id.as_deref(),
                 platform: ci.platform.as_deref(),
                 sdk,
                 device,
@@ -1076,6 +1077,7 @@ pub struct JoinAdvanceArgs {
 
 #[derive(Debug, Clone, Default)]
 pub struct ClientInfo {
+    pub client_id: Option<AStr>,
     pub platform: Option<AStr>,
     pub sdk_name: Option<AStr>,
     pub sdk_version: Option<AStr>,

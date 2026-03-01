@@ -103,6 +103,9 @@ impl<'a, UTREE, DEVICE> OpenSessionRequestSer<'a, UTREE, DEVICE> {
 
 #[derive(serde::Serialize, Clone, PartialEq, Debug)]
 pub struct ClientInfoSer<'a, DEVICE = HashMap<&'a str, &'a str>> {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub client_id: Option<&'a str>,
+
     /// 客户端平台类型，如 Android / iOS / Windows
     #[serde(skip_serializing_if = "Option::is_none")]
     pub platform: Option<&'a str>,

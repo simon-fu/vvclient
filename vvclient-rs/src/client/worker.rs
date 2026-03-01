@@ -809,6 +809,7 @@ impl<T: Delegate> Task<T> {
                 None
             };
             proto::ClientInfoSer {
+                client_id: ci.client_id.as_deref(),
                 platform: ci.platform.as_deref(),
                 sdk,
                 device,

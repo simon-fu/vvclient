@@ -28,6 +28,7 @@ pub struct JoinAdvanceArgs {
 
 #[derive(Debug, Clone, Default)]
 pub struct ClientInfo {
+    pub client_id: Option<AStr>,
     pub platform: Option<AStr>,
     pub sdk_name: Option<AStr>,
     pub sdk_version: Option<AStr>,

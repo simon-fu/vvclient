@@ -39,6 +39,7 @@ pub struct SignalConfig {
 impl Into<JoinConfig> for SignalConfig {
     fn into(self) -> JoinConfig {
         let client_info = self.client_info.map(|ci| ClientInfoInner {
+            client_id: ci.client_id.map(Into::into),
             platform: ci.platform.map(Into::into),
             sdk_name: ci.sdk_name.map(Into::into),
             sdk_version: ci.sdk_version.map(Into::into),
@@ -80,6 +81,7 @@ impl Into<JoinConfig> for SignalConfig {
 
 #[derive(uniffi::Record, Debug, Clone)]
 pub struct ClientInfo {
+    pub client_id: Option<String>,
     pub platform: Option<String>,
     pub sdk_name: Option<String>,
     pub sdk_version: Option<String>,
