@@ -6,7 +6,7 @@ use anyhow::{Context as _, Result};
 use tokio::net::TcpStream;
 use tokio_tungstenite::{
     Connector, MaybeTlsStream, WebSocketStream, connect_async, connect_async_tls_with_config,
-    tungstenite::{Message as WsMessage, Utf8Bytes, protocol::WebSocketConfig},
+    tungstenite::{Message as WsMessage, Utf8Bytes, http, protocol::WebSocketConfig},
 };
 use trace_error::anyhow::trace_result;
 use tracing::debug;
@@ -67,12 +67,22 @@ impl TungConnector {
         .await
         .with_context(|| format!("failed to connect to [{}]", url))?;
 
-        Ok(TungStream {
-            socket,
-            recv_packet: Default::default(),
-            recv_ping: Default::default(),
-            is_closed: Default::default(),
-        })
+        Ok(TungStream::from_socket(socket))
+    }
+
+    #[trace_result]
+    pub async fn connect_with_headers(&self, url: &str, headers: &[(&str, &str)]) -> Result<TungStream> {
+        let req = build_ws_request(url, headers)?;
+        let (socket, _rsp) = connect_async_tls_with_config(
+            req,
+            self.config.clone(),
+            self.disable_nagle,
+            self.connector.clone(),
+        )
+        .await
+        .with_context(|| format!("failed to connect to [{}] with headers", url))?;
+
+        Ok(TungStream::from_socket(socket))
     }
 }
 
@@ -85,20 +95,29 @@ pub struct TungStream {
 }
 
 impl TungStream {
-    pub async fn connect(url: &str) -> Result<Self> {
-        let (socket, _rsp) = connect_async(url)
-            .await
-            .with_context(|| format!("failed to connect to [{}]", url))?;
-        Ok(Self {
+    fn from_socket(socket: WsStream) -> Self {
+        Self {
             socket,
             recv_packet: Default::default(),
             recv_ping: Default::default(),
             is_closed: Default::default(),
-        })
+        }
+    }
+
+    pub async fn connect(url: &str) -> Result<Self> {
+        let (socket, _rsp) = connect_async(url)
+            .await
+            .with_context(|| format!("failed to connect to [{}]", url))?;
+        Ok(Self::from_socket(socket))
     }
 
     pub async fn send_text(&mut self, text: String) -> Result<()> {
         self.socket.send(WsMessage::Text(text.into())).await?;
+        Ok(())
+    }
+
+    pub async fn send_binary(&mut self, data: Vec<u8>) -> Result<()> {
+        self.socket.send(WsMessage::Binary(data.into())).await?;
         Ok(())
     }
 
@@ -180,3 +199,24 @@ impl TungStream {
 
 pub type WsStream = WebSocketStream<MaybeTlsStream<TcpStream>>;
 pub type Packet = Utf8Bytes;
+
+fn build_ws_request(url: &str, headers: &[(&str, &str)]) -> Result<http::Request<()>> {
+    let mut builder = http::Request::builder().uri(url);
+    for (k, v) in headers {
+        builder = builder.header(*k, *v);
+    }
+    Ok(builder.body(())?)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::build_ws_request;
+
+    #[test]
+    fn build_ws_request_applies_upload_header() {
+        let req =
+            build_ws_request("wss://127.0.0.1:11443/ws", &[("X-VV-Request-Type", "upload.file")]).unwrap();
+
+        assert_eq!(req.headers()["X-VV-Request-Type"], "upload.file");
+    }
+}
