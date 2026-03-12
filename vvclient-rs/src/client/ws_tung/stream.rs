@@ -7,8 +7,7 @@ use tokio::net::TcpStream;
 use tokio_tungstenite::{
     Connector, MaybeTlsStream, WebSocketStream, connect_async, connect_async_tls_with_config,
     tungstenite::{
-        Message as WsMessage, Utf8Bytes, client::IntoClientRequest, http,
-        protocol::WebSocketConfig,
+        Message as WsMessage, Utf8Bytes, client::IntoClientRequest, http, protocol::WebSocketConfig,
     },
 };
 use trace_error::anyhow::trace_result;
@@ -74,7 +73,11 @@ impl TungConnector {
     }
 
     #[trace_result]
-    pub async fn connect_with_headers(&self, url: &str, headers: &[(&str, &str)]) -> Result<TungStream> {
+    pub async fn connect_with_headers(
+        &self,
+        url: &str,
+        headers: &[(&str, &str)],
+    ) -> Result<TungStream> {
         let req = build_ws_request(url, headers)?;
         let (socket, _rsp) = connect_async_tls_with_config(
             req,
@@ -220,8 +223,11 @@ mod tests {
 
     #[test]
     fn build_ws_request_applies_upload_header() {
-        let req =
-            build_ws_request("wss://127.0.0.1:11443/ws", &[("X-VV-Request-Type", "upload.file")]).unwrap();
+        let req = build_ws_request(
+            "wss://127.0.0.1:11443/ws",
+            &[("X-VV-Request-Type", "upload.file")],
+        )
+        .unwrap();
 
         assert_eq!(req.headers()["X-VV-Request-Type"], "upload.file");
     }
